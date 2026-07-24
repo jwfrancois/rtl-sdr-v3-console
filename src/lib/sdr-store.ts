@@ -55,6 +55,36 @@ function persistState(state: PersistedState) {
   }, 500);
 }
 
+/**
+ * Hydrate the store from localStorage after mount. MUST be called from a
+ * React effect (client-only) to avoid hydration mismatches — if we
+ * initialized the store with persisted values at module load, the server
+ * render (defaults) would differ from the client render (persisted),
+ * triggering a hydration error.
+ *
+ * This function reads localStorage and applies the persisted values via
+ * `set()`, causing a single re-render on the client.
+ */
+export function hydrateFromStorage() {
+  const persisted = loadPersistedState();
+  if (Object.keys(persisted).length === 0) return;
+  useSdrStore.setState({
+    ...(persisted.frequency != null ? { frequency: persisted.frequency } : {}),
+    ...(persisted.demod != null ? { demod: persisted.demod } : {}),
+    ...(persisted.bandwidth != null ? { bandwidth: persisted.bandwidth } : {}),
+    ...(persisted.sampleRate != null ? { sampleRate: persisted.sampleRate } : {}),
+    ...(persisted.gainDb != null ? { gainDb: persisted.gainDb } : {}),
+    ...(persisted.autoGain != null ? { autoGain: persisted.autoGain } : {}),
+    ...(persisted.squelch != null ? { squelch: persisted.squelch } : {}),
+    ...(persisted.volume != null ? { volume: persisted.volume } : {}),
+    ...(persisted.ppmCorrection != null ? { ppmCorrection: persisted.ppmCorrection } : {}),
+    ...(persisted.agcSpeed != null ? { agcSpeed: persisted.agcSpeed } : {}),
+    ...(persisted.bookmarks != null ? { bookmarks: persisted.bookmarks } : {}),
+    ...(persisted.backend != null ? { backend: persisted.backend } : {}),
+    ...(persisted.bridgeUrl != null ? { bridgeUrl: persisted.bridgeUrl } : {}),
+  });
+}
+
 export interface Bookmark {
   id: string;
   label: string;
@@ -195,21 +225,20 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-// Load saved state once (only on client)
-const _persisted = loadPersistedState();
-
+// Initialize with defaults — localStorage hydration happens in a
+// mount effect (see hydrateFromStorage) to avoid SSR/CSR mismatch.
 export const useSdrStore = create<SdrState>((set, get) => ({
-  frequency: _persisted.frequency ?? 91.5e6,
-  demod: _persisted.demod ?? "WFM",
-  bandwidth: _persisted.bandwidth ?? 180e3,
-  sampleRate: _persisted.sampleRate ?? 2.4e6,
-  gainDb: _persisted.gainDb ?? 30,
-  autoGain: _persisted.autoGain ?? false,
-  squelch: _persisted.squelch ?? 0.15,
-  volume: _persisted.volume ?? 0.7,
-  audioEnabled: false, // Never persist audioEnabled — must be user-gesture initiated
-  ppmCorrection: _persisted.ppmCorrection ?? 0,
-  agcSpeed: _persisted.agcSpeed ?? "medium",
+  frequency: 91.5e6,
+  demod: "WFM",
+  bandwidth: 180e3,
+  sampleRate: 2.4e6,
+  gainDb: 30,
+  autoGain: false,
+  squelch: 0.15,
+  volume: 0.7,
+  audioEnabled: false,
+  ppmCorrection: 0,
+  agcSpeed: "medium",
   running: true,
 
   setFrequency: (hz) =>
@@ -230,7 +259,7 @@ export const useSdrStore = create<SdrState>((set, get) => ({
   setAgcSpeed: (s) => set({ agcSpeed: s }),
   setRunning: (r) => set({ running: r }),
 
-  bookmarks: _persisted.bookmarks ?? DEFAULT_BOOKMARKS,
+  bookmarks: DEFAULT_BOOKMARKS,
   addBookmark: (b) =>
     set((s) => ({
       bookmarks: [
@@ -268,8 +297,8 @@ export const useSdrStore = create<SdrState>((set, get) => ({
     })),
 
   // Real-SDR connection state
-  backend: _persisted.backend ?? "simulated",
-  bridgeUrl: _persisted.bridgeUrl ?? "ws://localhost:8080",
+  backend: "simulated",
+  bridgeUrl: "ws://localhost:8080",
   bridgeConnecting: false,
   bridgeError: null,
   hwStatus: null,

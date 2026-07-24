@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StatusHeader } from "@/components/sdr/status-header";
 import { TransportBar } from "@/components/sdr/transport-bar";
 import { SpectrumAnalyzer } from "@/components/sdr/spectrum-analyzer";
@@ -30,13 +30,22 @@ import { InmarsatPanel } from "@/components/sdr/inmarsat-panel";
 import { GpsPanel } from "@/components/sdr/gps-panel";
 import { UtcClock } from "@/components/sdr/utc-clock";
 import { SolarConditionsPanel } from "@/components/sdr/solar-conditions-panel";
-import { useSdrStore } from "@/lib/sdr-store";
+import { TuningDial } from "@/components/sdr/tuning-dial";
+import { SdrcomMeter } from "@/components/sdr/sdrcom-meter";
+import { PresetProfilesPanel } from "@/components/sdr/preset-profiles-panel";
+import { useSdrStore, hydrateFromStorage } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
 
 export default function Home() {
   const [hoverFreq, setHoverFreq] = useState<number | null>(null);
   const setFullscreen = useSdrStore((s) => s.setFullscreen);
+
+  // Hydrate the store from localStorage AFTER mount to avoid SSR/CSR
+  // hydration mismatch (server renders defaults, client renders persisted).
+  useEffect(() => {
+    hydrateFromStorage();
+  }, []);
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -133,6 +142,12 @@ export default function Home() {
               <AudioOscilloscope height={64} />
             </div>
 
+            {/* SDRCOM Receiver Meter (dBm/SNR/noise floor/peak) */}
+            <SdrcomMeter />
+
+            {/* Tuning Dial (rotary knob) */}
+            <TuningDial />
+
             {/* ADS-B tracker (only shows when tuned to 1090 MHz) */}
             <AdsbPanel />
 
@@ -162,6 +177,7 @@ export default function Home() {
               <AudioRecorder />
             </div>
             <MessagesPanel />
+            <PresetProfilesPanel />
             <BookmarksPanel />
           </aside>
         </div>
