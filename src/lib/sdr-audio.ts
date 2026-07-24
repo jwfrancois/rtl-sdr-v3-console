@@ -80,6 +80,8 @@ export class SdrAudioEngine {
   private realMode = false;
   private nextStartTime = 0;
   private realGain: GainNode | null = null;
+  /** Pending buffer sources — tracked so we can cancel them on tune. */
+  private pendingSources: Set<AudioBufferSourceNode> = new Set();
 
   setRealMode(enabled: boolean) {
     this.realMode = enabled;
@@ -110,6 +112,27 @@ export class SdrAudioEngine {
     }
   }
 
+  /**
+   * Cancel all pending audio frames. Called when the user tunes to a new
+   * frequency — we want the old audio GONE immediately, so the new
+   * frequency's audio plays without waiting for the queue to drain.
+   *
+   * Without this, you hear 100-200ms of the OLD station after clicking
+   * the new one, which feels laggy compared to a real radio.
+   */
+  flushPendingAudio() {
+    if (!this.ctx) return;
+    for (const src of this.pendingSources) {
+      try {
+        src.stop();
+        src.disconnect();
+      } catch {}
+    }
+    this.pendingSources.clear();
+    // Reset the schedule so the next frame plays immediately
+    this.nextStartTime = this.ctx.currentTime + 0.005;
+  }
+
   /** Push a real demodulated audio frame into the output queue. */
   pushRealAudioFrame(samples: Float32Array, sampleRate: number, volume: number) {
     if (!this.realMode || !this.ctx || !this.masterGain || !this.realGain) return;
@@ -127,8 +150,11 @@ export class SdrAudioEngine {
     const start = Math.max(this.nextStartTime, ctx.currentTime + 0.005);
     src.start(start);
     this.nextStartTime = start + samples.length / sampleRate;
+    // Track for cancellation
+    this.pendingSources.add(src);
     // Cleanup source after it finishes
     src.onended = () => {
+      this.pendingSources.delete(src);
       try {
         src.disconnect();
       } catch {}

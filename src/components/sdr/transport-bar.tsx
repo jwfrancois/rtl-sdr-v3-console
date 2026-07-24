@@ -79,10 +79,16 @@ export function TransportBar({ level }: Props) {
     if (useReal) {
       // Switch to real mode — synth voices will be muted
       engine.setRealMode(true);
+      // On frequency change in real mode, flush pending audio so the new
+      // station plays immediately (no overlap with the old one).
+      engine.flushPendingAudio();
       return;
     }
-    // Simulated mode (or real-but-disconnected) — drive synth voices
+    // Simulated mode (or real-but-disconnected) — drive synth voices.
+    // On frequency change, also flush any pending synth voices so the new
+    // station's audio starts cleanly without overlapping with the old one.
     engine.setRealMode(false);
+    engine.flushPendingAudio();
     const station = findStationAt(frequency);
     const signal = station ? stationSignalAt(station, frequency) : 0;
     if (audioEnabled) {

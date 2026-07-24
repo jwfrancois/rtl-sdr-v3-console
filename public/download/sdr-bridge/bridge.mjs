@@ -127,7 +127,9 @@ function inferTunerName(id) {
 }
 
 let iqBuffer = Buffer.alloc(0);
-const CHUNK_SIZE = 32768;
+// Smaller chunks + faster flush = new frequency's audio plays sooner
+// after retune. Was 32768 bytes @ 50ms; now 16384 @ 16ms (~60 Hz).
+const CHUNK_SIZE = 16384;
 setInterval(() => {
   if (iqBuffer.length === 0 || clients.size === 0) return;
   while (iqBuffer.length >= CHUNK_SIZE) {
@@ -135,7 +137,7 @@ setInterval(() => {
     iqBuffer = iqBuffer.subarray(CHUNK_SIZE);
     shipIqFrame(chunk);
   }
-}, 50);
+}, 16);
 
 function onIqData(buf) {
   if (!streaming || clients.size === 0) return;
@@ -393,6 +395,11 @@ wss.on("connection", (ws) => {
         break;
       case "start": streaming = true; console.log("[bridge] streaming started"); break;
       case "stop": streaming = false; console.log("[bridge] streaming stopped"); break;
+      case "flush":
+        // Drop the IQ buffer so the next chunk the client receives is
+        // from the NEW frequency, not stale samples from the old one.
+        iqBuffer = Buffer.alloc(0);
+        break;
       case "status": broadcastStatus(); break;
       case "start_recording":
         startRecording(msg.name);

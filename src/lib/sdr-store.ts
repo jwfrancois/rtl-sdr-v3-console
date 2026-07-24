@@ -11,6 +11,50 @@ import {
 } from "./sdr-engine";
 import type { SdrStatus } from "./real-sdr/types";
 
+// ----------------------------------------------------------------------
+// localStorage persistence — load saved state on startup
+// ----------------------------------------------------------------------
+const STORAGE_KEY = "rtl-sdr-v3-console-state-v1";
+
+interface PersistedState {
+  frequency: number;
+  demod: DemodMode;
+  bandwidth: number;
+  sampleRate: number;
+  gainDb: number;
+  autoGain: boolean;
+  squelch: number;
+  volume: number;
+  ppmCorrection: number;
+  agcSpeed: "slow" | "medium" | "fast";
+  bookmarks: Bookmark[];
+  backend: SdrBackend;
+  bridgeUrl: string;
+}
+
+function loadPersistedState(): Partial<PersistedState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+// Debounced save — don't write on every frequency change
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function persistState(state: PersistedState) {
+  if (typeof window === "undefined") return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {}
+  }, 500);
+}
+
 export interface Bookmark {
   id: string;
   label: string;
@@ -151,18 +195,21 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
+// Load saved state once (only on client)
+const _persisted = loadPersistedState();
+
 export const useSdrStore = create<SdrState>((set, get) => ({
-  frequency: 91.5e6,
-  demod: "WFM",
-  bandwidth: 180e3,
-  sampleRate: 2.4e6,
-  gainDb: 30,
-  autoGain: false,
-  squelch: 0.15,
-  volume: 0.7,
-  audioEnabled: false,
-  ppmCorrection: 0,
-  agcSpeed: "medium",
+  frequency: _persisted.frequency ?? 91.5e6,
+  demod: _persisted.demod ?? "WFM",
+  bandwidth: _persisted.bandwidth ?? 180e3,
+  sampleRate: _persisted.sampleRate ?? 2.4e6,
+  gainDb: _persisted.gainDb ?? 30,
+  autoGain: _persisted.autoGain ?? false,
+  squelch: _persisted.squelch ?? 0.15,
+  volume: _persisted.volume ?? 0.7,
+  audioEnabled: false, // Never persist audioEnabled — must be user-gesture initiated
+  ppmCorrection: _persisted.ppmCorrection ?? 0,
+  agcSpeed: _persisted.agcSpeed ?? "medium",
   running: true,
 
   setFrequency: (hz) =>
@@ -183,7 +230,7 @@ export const useSdrStore = create<SdrState>((set, get) => ({
   setAgcSpeed: (s) => set({ agcSpeed: s }),
   setRunning: (r) => set({ running: r }),
 
-  bookmarks: DEFAULT_BOOKMARKS,
+  bookmarks: _persisted.bookmarks ?? DEFAULT_BOOKMARKS,
   addBookmark: (b) =>
     set((s) => ({
       bookmarks: [
@@ -221,8 +268,8 @@ export const useSdrStore = create<SdrState>((set, get) => ({
     })),
 
   // Real-SDR connection state
-  backend: "simulated",
-  bridgeUrl: "ws://localhost:8080",
+  backend: _persisted.backend ?? "simulated",
+  bridgeUrl: _persisted.bridgeUrl ?? "ws://localhost:8080",
   bridgeConnecting: false,
   bridgeError: null,
   hwStatus: null,
@@ -250,6 +297,28 @@ export const useSdrStore = create<SdrState>((set, get) => ({
 /** Select the strongest station currently under the cursor, if any. */
 export function useActiveStation() {
   return useSdrStore((s) => findStationAt(s.frequency));
+}
+
+// Auto-persist on every change (debounced). This must run only on the
+// client — guarded by the typeof window check inside persistState.
+if (typeof window !== "undefined") {
+  useSdrStore.subscribe((s) => {
+    persistState({
+      frequency: s.frequency,
+      demod: s.demod,
+      bandwidth: s.bandwidth,
+      sampleRate: s.sampleRate,
+      gainDb: s.gainDb,
+      autoGain: s.autoGain,
+      squelch: s.squelch,
+      volume: s.volume,
+      ppmCorrection: s.ppmCorrection,
+      agcSpeed: s.agcSpeed,
+      bookmarks: s.bookmarks,
+      backend: s.backend,
+      bridgeUrl: s.bridgeUrl,
+    });
+  });
 }
 
 export { STATIONS };

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
+import { getAudioEngine } from "@/lib/sdr-audio";
 import { RealSdrSource } from "./real-sdr-source";
 import { AudioFrame, SdrStatus } from "./types";
 import { RdsState } from "./rds";
@@ -287,6 +288,13 @@ export function useRealSdrManager() {
     const last = lastForwardedRef.current;
     if (s.frequency !== last.frequency) {
       source.configure({ type: "set_frequency", hz: s.frequency });
+      // Tell the bridge to flush its IQ buffer so we don't get stale
+      // samples from the old frequency mixing with new ones
+      source.configure({ type: "flush" });
+      // CRITICAL: cancel any pending audio from the previous frequency.
+      // Without this, the user hears 100-200ms of the OLD station after
+      // clicking the new one — feels laggy compared to a real radio.
+      getAudioEngine().flushPendingAudio();
       last.frequency = s.frequency;
     }
     if (s.sampleRate !== last.sampleRate) {

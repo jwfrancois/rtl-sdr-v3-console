@@ -28,6 +28,8 @@ import { MeteorPanel } from "@/components/sdr/meteor-panel";
 import { GoesPanel } from "@/components/sdr/goes-panel";
 import { InmarsatPanel } from "@/components/sdr/inmarsat-panel";
 import { GpsPanel } from "@/components/sdr/gps-panel";
+import { UtcClock } from "@/components/sdr/utc-clock";
+import { SolarConditionsPanel } from "@/components/sdr/solar-conditions-panel";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -150,8 +152,10 @@ export default function Home() {
             <GpsPanel />
           </section>
 
-          {/* RIGHT column: station card + audio recorder + recording + messages + bookmarks */}
+          {/* RIGHT column: UTC clock + solar + station card + recording + messages + bookmarks */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
+            <UtcClock />
+            <SolarConditionsPanel />
             <ActiveStationCard />
             <div>
               <RecordingPanel />

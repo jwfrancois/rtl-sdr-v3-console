@@ -30,7 +30,8 @@ export type SdrCommand =
   | { type: "stop" }
   | { type: "status" }
   | { type: "start_recording"; name?: string }
-  | { type: "stop_recording" };
+  | { type: "stop_recording" }
+  | { type: "flush" }; // flush IQ buffer on retune
 
 /** Status payload the bridge periodically reports. */
 export interface SdrStatus {
