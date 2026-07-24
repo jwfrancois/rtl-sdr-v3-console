@@ -13,6 +13,7 @@ import {
   createDemodulator,
   bytesToFloatIQ,
 } from "./demodulators";
+import { RdsDecoder, RdsState } from "./rds";
 import { DemodMode } from "@/lib/sdr-engine";
 
 /**
@@ -35,6 +36,11 @@ export class RealSdrSource implements SdrSource {
   private bandwidth: number;
   private pendingCmds: SdrCommand[] = [];
   private closed = false;
+
+  // RDS decoder — only runs when in WFM mode
+  private rds: RdsDecoder;
+  private rdsCbs = new Set<(s: RdsState) => void>();
+  private lastRdsEmit = 0;
 
   // Subscribers
   private spectrumCbs = new Set<(d: Float32Array, fc: number, sr: number) => void>();
@@ -61,6 +67,7 @@ export class RealSdrSource implements SdrSource {
     this.demodKind = "WFM";
     this.bandwidth = 180e3;
     this.demod = createDemodulator(this.demodKind, this.bandwidth);
+    this.rds = new RdsDecoder();
   }
 
   /** Set the demodulator mode + bandwidth. Recreates the demod instance. */
@@ -70,6 +77,15 @@ export class RealSdrSource implements SdrSource {
     this.demodKind = kind;
     this.bandwidth = bandwidth;
     this.demod = createDemodulator(kind, bandwidth);
+    // RDS only makes sense on broadcast FM — reset it otherwise
+    if (kind !== "WFM") this.rds.reset();
+  }
+
+  /** Subscribe to RDS state updates. */
+  onRds(cb: (s: RdsState) => void): () => void {
+    this.rdsCbs.add(cb);
+    cb(this.rds.state);
+    return () => this.rdsCbs.delete(cb);
   }
 
   connect(): Promise<void> {
@@ -156,8 +172,22 @@ export class RealSdrSource implements SdrSource {
     for (const cb of this.spectrumCbs) {
       cb(this.spectrumBuf, block.frequency, block.sampleRate);
     }
-    // 2) Demodulate audio
+
+    // 2) Convert to float IQ
     const floatIQ = bytesToFloatIQ(block.data);
+
+    // 3) Run RDS decoder only in WFM mode (broadcast FM)
+    if (this.demodKind === "WFM" && this.rdsCbs.size > 0) {
+      this.rds.process(floatIQ, block.sampleRate);
+      // Throttle RDS state emission to ~5 Hz — RDS only updates ~1 Hz anyway
+      const now = performance.now();
+      if (now - this.lastRdsEmit > 200) {
+        this.lastRdsEmit = now;
+        for (const cb of this.rdsCbs) cb(this.rds.state);
+      }
+    }
+
+    // 4) Demodulate audio
     const result = this.demod.process(floatIQ, block.sampleRate);
     const frame: AudioFrame = {
       samples: result.audio,

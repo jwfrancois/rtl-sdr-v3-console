@@ -4,6 +4,63 @@ A tiny Node.js script that connects to a local `rtl_tcp` instance on your PC
 and exposes the IQ stream + control over WebSocket, so the browser app can
 talk to your real RTL-SDR V3 hardware.
 
+## Portable / remote access (use the dongle from anywhere)
+
+By default the bridge speaks plain `ws://` (insecure WebSocket). Browsers
+allow `ws://localhost:8080` from any page, but if you want to access the
+dongle from a different device (e.g. your phone, another PC, or the cloud
+preview), you need `wss://` (TLS).
+
+### Option A: self-signed cert (recommended for LAN access)
+
+```bash
+# Start the bridge with --tls; it auto-generates a cert into ./certs/
+node bridge.mjs --tls
+# → wss://0.0.0.0:8443
+```
+
+Your browser will warn about the self-signed cert the first time. Visit
+`https://<your-pc-ip>:8443/` once in your browser and click "Advanced →
+Proceed" to trust it. After that, the WebSocket URL
+`wss://<your-pc-ip>:8443` works from any device on your LAN.
+
+### Option B: use your own cert (Let's Encrypt / corporate)
+
+```bash
+node bridge.mjs --tls --cert /path/fullchain.pem --key /path/privkey.pem
+```
+
+### Option C: ngrok tunnel (works from anywhere, no cert setup)
+
+```bash
+# In one terminal — your bridge
+node bridge.mjs
+
+# In another — expose it via ngrok
+ngrok http 8080
+# → https://abcd-1234.ngrok-free.app
+```
+
+Then in the web app, set the bridge URL to `wss://abcd-1234.ngrok-free.app`
+(replacing with your actual ngrok URL). This works from anywhere — phone,
+laptop, anywhere in the world — and tunnels through your firewall.
+
+### Downloading recordings remotely
+
+The bridge also runs an HTTP server on `port + 1` (default `8081`) that
+serves recorded IQ files. The web app auto-discovers this URL when you
+switch to real mode — just click any recording in the **IQ Recording**
+panel to download it.
+
+For remote access via ngrok, expose port 8081 too:
+```bash
+ngrok http 8081
+```
+
+The app's recording panel will then need both URLs — for now, download
+recordings from the same `ws` host by visiting
+`http://<your-pc-ip>:8081/recordings` directly in your browser.
+
 ## Quick start
 
 ### 1. Install `rtl_tcp`

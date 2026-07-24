@@ -80,6 +80,20 @@ interface SdrState extends SdrSettings {
   setBridgeConnecting: (b: boolean) => void;
   setBridgeError: (e: string | null) => void;
   setHwStatus: (s: SdrStatus | null) => void;
+
+  // Fullscreen spectrum mode
+  fullscreen: boolean;
+  setFullscreen: (b: boolean) => void;
+
+  // Scan mode state
+  scanning: boolean;
+  scanMode: "peak" | "squelch" | "sweep";
+  scanBand: { label: string; start: number; end: number } | null;
+  scanFoundFreq: number | null;
+  setScanning: (b: boolean) => void;
+  setScanMode: (m: "peak" | "squelch" | "sweep") => void;
+  setScanBand: (b: { label: string; start: number; end: number } | null) => void;
+  setScanFoundFreq: (f: number | null) => void;
 }
 
 const DEFAULT_BOOKMARKS: Bookmark[] = [
@@ -217,6 +231,20 @@ export const useSdrStore = create<SdrState>((set, get) => ({
   setBridgeConnecting: (b) => set({ bridgeConnecting: b }),
   setBridgeError: (e) => set({ bridgeError: e }),
   setHwStatus: (s) => set({ hwStatus: s }),
+
+  // Fullscreen spectrum
+  fullscreen: false,
+  setFullscreen: (b) => set({ fullscreen: b }),
+
+  // Scan mode
+  scanning: false,
+  scanMode: "peak",
+  scanBand: null,
+  scanFoundFreq: null,
+  setScanning: (b) => set({ scanning: b }),
+  setScanMode: (m) => set({ scanMode: m }),
+  setScanBand: (b) => set({ scanBand: b }),
+  setScanFoundFreq: (f) => set({ scanFoundFreq: f }),
 }));
 
 /** Select the strongest station currently under the cursor, if any. */

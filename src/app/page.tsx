@@ -13,29 +13,38 @@ import { BookmarksPanel } from "@/components/sdr/bookmarks-panel";
 import { ActiveStationCard } from "@/components/sdr/active-station-card";
 import { AudioOscilloscope } from "@/components/sdr/audio-oscilloscope";
 import { ConnectionPanel } from "@/components/sdr/connection-panel";
+import { RdsOverlay } from "@/components/sdr/rds-overlay";
+import { RecordingPanel } from "@/components/sdr/recording-panel";
+import { ScannerPanel } from "@/components/sdr/scanner-panel";
+import { FullscreenSpectrum } from "@/components/sdr/fullscreen-spectrum";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
-import { MousePointer2, Crosshair } from "lucide-react";
+import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
 
 export default function Home() {
   const [hoverFreq, setHoverFreq] = useState<number | null>(null);
+  const setFullscreen = useSdrStore((s) => s.setFullscreen);
 
   return (
     <main className="min-h-screen flex flex-col">
       {/* Top decorative glow line */}
       <div className="h-px w-full bg-gradient-to-r from-transparent via-[oklch(0.85_0.18_195/0.6)] to-transparent" />
 
+      {/* Fullscreen overlay (mounted always; renders only when active) */}
+      <FullscreenSpectrum />
+
       <div className="flex-1 px-3 sm:px-4 lg:px-6 py-4 max-w-[1800px] mx-auto w-full">
         <StatusHeader />
 
         {/* Main grid */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* LEFT column: connection + tuner + demod + gain */}
+          {/* LEFT column: connection + tuner + demod + gain + scanner */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
             <ConnectionPanel />
             <FrequencyTuner />
             <DemodulatorControls />
             <GainControls />
+            <ScannerPanel />
           </aside>
 
           {/* CENTER column: spectrum + waterfall + transport */}
@@ -43,7 +52,7 @@ export default function Home() {
             <TransportBar />
 
             {/* Spectrum panel */}
-            <div className="sdr-panel sdr-panel-glow rounded-xl p-4">
+            <div className="sdr-panel sdr-panel-glow rounded-xl p-4 relative">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <Crosshair className="h-3.5 w-3.5 text-[oklch(0.85_0.18_195)]" />
@@ -51,18 +60,35 @@ export default function Home() {
                     Spectrum Analyzer · HD
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-[11px] sdr-mono text-[oklch(0.55_0.04_250)]">
-                  {hoverFreq ? (
-                    <span className="text-[oklch(0.85_0.18_195)]">
-                      <MousePointer2 className="inline h-3 w-3 mr-1" />
-                      {formatFrequency(hoverFreq)}
-                    </span>
-                  ) : (
-                    <span>FFT 512 · 60 fps</span>
-                  )}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFullscreen(true)}
+                    className="text-[oklch(0.65_0.04_250)] hover:text-[oklch(0.85_0.18_195)] transition-colors"
+                    aria-label="Enter fullscreen spectrum mode"
+                    title="Fullscreen (ESC to exit)"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="text-[11px] sdr-mono text-[oklch(0.55_0.04_250)]">
+                    {hoverFreq ? (
+                      <span className="text-[oklch(0.85_0.18_195)]">
+                        <MousePointer2 className="inline h-3 w-3 mr-1" />
+                        {formatFrequency(hoverFreq)}
+                      </span>
+                    ) : (
+                      <span>FFT 512 · 60 fps</span>
+                    )}
+                  </div>
                 </div>
               </div>
               <SpectrumAnalyzer height={220} onHover={setHoverFreq} />
+              {/* RDS overlay — only shows on broadcast FM in real mode */}
+              <div className="absolute top-12 right-6 w-64 pointer-events-none">
+                <div className="pointer-events-auto">
+                  <RdsOverlay />
+                </div>
+              </div>
             </div>
 
             {/* Waterfall panel */}
@@ -88,9 +114,10 @@ export default function Home() {
             </div>
           </section>
 
-          {/* RIGHT column: station card + bookmarks */}
+          {/* RIGHT column: station card + recording + bookmarks */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
             <ActiveStationCard />
+            <RecordingPanel />
             <BookmarksPanel />
           </aside>
         </div>

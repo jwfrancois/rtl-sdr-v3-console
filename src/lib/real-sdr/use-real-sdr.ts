@@ -4,21 +4,19 @@ import { useEffect, useRef } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { RealSdrSource } from "./real-sdr-source";
 import { AudioFrame, SdrStatus } from "./types";
+import { RdsState } from "./rds";
 
 /**
- * Global callback sets for spectrum + audio.
+ * Global callback sets for spectrum + audio + RDS.
  *
  * We use module-level sets (not tied to the source instance) so that
  * components can subscribe at mount time — even before the source exists
  * — and their callbacks will automatically receive data once the source
  * is created later (when the user switches to "real" mode).
- *
- * This avoids the race condition where a component mounts, calls
- * `onRealSpectrum(cb)`, but the source doesn't exist yet so the
- * subscription silently becomes a no-op.
  */
 const spectrumCbs = new Set<(data: Float32Array, fc: number, sr: number) => void>();
 const audioCbs = new Set<(f: AudioFrame) => void>();
+const rdsCbs = new Set<(s: RdsState) => void>();
 
 /**
  * Singleton holder for the RealSdrSource. The source is created on first
@@ -28,13 +26,20 @@ let source: RealSdrSource | null = null;
 let sourceWired = false; // have we already attached the dispatch listeners?
 let statusSubscribed = false;
 
+/** Get or create the singleton source (used by the recording panel). */
+export function _getSource(bridgeUrl: string): RealSdrSource | null {
+  if (!source) return null;
+  if (source.url !== bridgeUrl) return null;
+  return source;
+}
+
 function getSource(bridgeUrl: string): RealSdrSource {
   if (!source || source.url !== bridgeUrl) {
     if (source) source.dispose();
     source = new RealSdrSource(bridgeUrl, 1024);
     sourceWired = false;
   }
-  // Wire the source's spectrum/audio dispatchers to our global sets.
+  // Wire the source's spectrum/audio/RDS dispatchers to our global sets.
   // This is idempotent — we only do it once per source instance.
   if (!sourceWired) {
     source.onSpectrum((data, fc, sr) => {
@@ -52,6 +57,15 @@ function getSource(bridgeUrl: string): RealSdrSource {
           cb(frame);
         } catch (e) {
           console.error("[sdr] audio callback error", e);
+        }
+      }
+    });
+    source.onRds((state) => {
+      for (const cb of rdsCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] RDS callback error", e);
         }
       }
     });
@@ -217,5 +231,17 @@ export function onRealAudio(cb: (f: AudioFrame) => void): () => void {
   audioCbs.add(cb);
   return () => {
     audioCbs.delete(cb);
+  };
+}
+
+/**
+ * Subscribe to RDS state updates. Same lifecycle guarantee as the others.
+ * Only produces meaningful updates when in WFM mode and tuned to a
+ * broadcast FM station carrying RDS.
+ */
+export function onRealRds(cb: (s: RdsState) => void): () => void {
+  rdsCbs.add(cb);
+  return () => {
+    rdsCbs.delete(cb);
   };
 }

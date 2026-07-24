@@ -28,7 +28,9 @@ export type SdrCommand =
   | { type: "set_ppm"; ppm: number }
   | { type: "start" }
   | { type: "stop" }
-  | { type: "status" };
+  | { type: "status" }
+  | { type: "start_recording"; name?: string }
+  | { type: "stop_recording" };
 
 /** Status payload the bridge periodically reports. */
 export interface SdrStatus {
@@ -44,6 +46,14 @@ export interface SdrStatus {
   overruns: number;
   /** Time the bridge has been streaming (seconds). */
   uptime: number;
+  /** Recording info if a recording is in progress, else null. */
+  recording: {
+    path: string;
+    bytes: number;
+    duration: number; // seconds
+    sampleRate: number;
+    frequency: number;
+  } | null;
 }
 
 /** A demodulated audio frame, ready to be pushed to the audio output. */
