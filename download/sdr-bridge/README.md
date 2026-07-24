@@ -27,10 +27,31 @@ sudo apt install rtl-sdr
 
 Add a udev rule so non-root users can access the dongle (Linux only):
 ```bash
-echo 'SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0666"' | sudo tee /etc/udev/rules.d/20.rtlsdr.rules
+# Write rules covering the RTL-SDR V3 + V4 + common clones
+sudo tee /etc/udev/rules.d/20.rtlsdr.rules > /dev/null <<'EOF'
+# RTL-SDR V3 / V4 (Realtek RTL2832U / RTL2838UHIDIR)
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0666", GROUP="plugdev"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE:="0666", GROUP="plugdev"
+# RTL-SDR.com Blog V3 / V4 (default VID:PID)
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", MODE:="0666", GROUP="plugdev"
+EOF
+
 sudo udevadm control --reload-rules
 sudo udevadm trigger
+
+# Make sure your user is in the plugdev group, then LOG OUT and back in
+sudo usermod -aG plugdev $USER
+
+# Unplug and replug the dongle (or force a re-add)
+sudo udevadm trigger --action=add --subsystem-match=usb
 ```
+
+If you see `usb_open error -3` when running `rtl_tcp`, that means the rules
+haven't taken effect yet. The two most common causes are (1) you haven't
+logged out/in after `usermod -aG plugdev`, or (2) the dongle was plugged
+in before the rules were loaded — unplug and replug it. As a last-resort
+fallback you can run `sudo rtl_tcp -s 2400000` (the bridge itself doesn't
+need root, only `rtl_tcp` does).
 
 ### 2. Start `rtl_tcp`
 
@@ -112,6 +133,37 @@ The bridge speaks a small JSON + binary protocol over WebSocket.
   | 16…    | bytes     | Interleaved unsigned 8-bit I/Q |
 
 ## Troubleshooting
+
+**`usb_open error -3` / `Failed to open rtlsdr device #0`** — Linux USB
+permission error. Your user can't access the raw device. Fix:
+
+```bash
+# 1. Write udev rules (one-time)
+sudo tee /etc/udev/rules.d/20.rtlsdr.rules > /dev/null <<'EOF'
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE:="0666", GROUP="plugdev"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE:="0666", GROUP="plugdev"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", MODE:="0666", GROUP="plugdev"
+EOF
+
+# 2. Reload + add yourself to plugdev
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+sudo usermod -aG plugdev $USER
+
+# 3. LOG OUT and log back in (or reboot) so the group change takes effect
+
+# 4. Unplug and replug the dongle
+```
+
+Quick fallback that works without any of the above:
+```bash
+sudo rtl_tcp -s 2400000
+```
+(The bridge itself doesn't need root — only `rtl_tcp` does.)
+
+**Garbled device name in `rtl_tcp` output** (`Found 1 device(s): 0: , PÆ, SN: `)
+— Normal. Your dongle's EEPROM doesn't have a friendly name programmed.
+The device still works fine.
 
 **"Bridge not reachable"** — Make sure `rtl_tcp` is running and the
 bridge script shows `WebSocket server listening on ws://0.0.0.0:8080`.
