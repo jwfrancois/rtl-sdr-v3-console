@@ -23,6 +23,11 @@ import { MessagesPanel } from "@/components/sdr/messages-panel";
 import { NotchFilterPanel } from "@/components/sdr/notch-filter-panel";
 import { AudioRecorder } from "@/components/sdr/audio-recorder";
 import { KeyboardShortcuts } from "@/components/sdr/keyboard-shortcuts";
+import { HdRadioOverlay } from "@/components/sdr/hd-radio-overlay";
+import { MeteorPanel } from "@/components/sdr/meteor-panel";
+import { GoesPanel } from "@/components/sdr/goes-panel";
+import { InmarsatPanel } from "@/components/sdr/inmarsat-panel";
+import { GpsPanel } from "@/components/sdr/gps-panel";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -96,6 +101,12 @@ export default function Home() {
                   <RdsOverlay />
                 </div>
               </div>
+              {/* HD Radio overlay — also only on broadcast FM */}
+              <div className="absolute top-12 left-12 w-64 pointer-events-none">
+                <div className="pointer-events-auto">
+                  <HdRadioOverlay />
+                </div>
+              </div>
             </div>
 
             {/* Waterfall panel */}
@@ -125,6 +136,18 @@ export default function Home() {
 
             {/* APT weather satellite decoder (only shows at 137 MHz) */}
             <AptPanel />
+
+            {/* Meteor M2 LRPT decoder (137 MHz, when not on NOAA APT freq) */}
+            <MeteorPanel />
+
+            {/* GOES HRIT decoder (1685-1694 MHz) */}
+            <GoesPanel />
+
+            {/* Inmarsat STD-C decoder (1537-1545 MHz) */}
+            <InmarsatPanel />
+
+            {/* GPS L1 C/A decoder (1575.42 MHz) */}
+            <GpsPanel />
           </section>
 
           {/* RIGHT column: station card + audio recorder + recording + messages + bookmarks */}

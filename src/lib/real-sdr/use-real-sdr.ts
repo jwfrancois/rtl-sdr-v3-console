@@ -9,6 +9,11 @@ import { AdsbState } from "./adsb";
 import { AptState } from "./apt";
 import { PocsagState } from "./pocsag";
 import { AcarsState } from "./acars";
+import { HdRadioState } from "./hd-radio";
+import { MeteorState } from "./meteor";
+import { HritState } from "./goes-hrit";
+import { StdcState } from "./inmarsat-stdc";
+import { GpsState } from "./gps-l1";
 import { NotchSpec } from "./notch-filter";
 
 /**
@@ -21,6 +26,11 @@ const adsbCbs = new Set<(s: AdsbState) => void>();
 const aptCbs = new Set<(s: AptState) => void>();
 const pocsagCbs = new Set<(s: PocsagState) => void>();
 const acarsCbs = new Set<(s: AcarsState) => void>();
+const hdRadioCbs = new Set<(s: HdRadioState) => void>();
+const meteorCbs = new Set<(s: MeteorState) => void>();
+const goesCbs = new Set<(s: HritState) => void>();
+const inmarsatCbs = new Set<(s: StdcState) => void>();
+const gpsCbs = new Set<(s: GpsState) => void>();
 const notchCbs = new Set<(n: NotchSpec[]) => void>();
 
 /**
@@ -107,6 +117,51 @@ function getSource(bridgeUrl: string): RealSdrSource {
           cb(state);
         } catch (e) {
           console.error("[sdr] ACARS callback error", e);
+        }
+      }
+    });
+    source.onHdRadio((state) => {
+      for (const cb of hdRadioCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] HD Radio callback error", e);
+        }
+      }
+    });
+    source.onMeteor((state) => {
+      for (const cb of meteorCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] Meteor callback error", e);
+        }
+      }
+    });
+    source.onGoes((state) => {
+      for (const cb of goesCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] GOES callback error", e);
+        }
+      }
+    });
+    source.onInmarsat((state) => {
+      for (const cb of inmarsatCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] Inmarsat callback error", e);
+        }
+      }
+    });
+    source.onGps((state) => {
+      for (const cb of gpsCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] GPS callback error", e);
         }
       }
     });
@@ -318,6 +373,36 @@ export function onRealPocsag(cb: (s: PocsagState) => void): () => void {
 export function onRealAcars(cb: (s: AcarsState) => void): () => void {
   acarsCbs.add(cb);
   return () => { acarsCbs.delete(cb); };
+}
+
+/** Subscribe to HD Radio SIS state. Updates on broadcast FM (87.5–108 MHz). */
+export function onRealHdRadio(cb: (s: HdRadioState) => void): () => void {
+  hdRadioCbs.add(cb);
+  return () => { hdRadioCbs.delete(cb); };
+}
+
+/** Subscribe to Meteor M2 LRPT state. Updates at 137–138 MHz. */
+export function onRealMeteor(cb: (s: MeteorState) => void): () => void {
+  meteorCbs.add(cb);
+  return () => { meteorCbs.delete(cb); };
+}
+
+/** Subscribe to GOES HRIT state. Updates at 1680–1700 MHz. */
+export function onRealGoes(cb: (s: HritState) => void): () => void {
+  goesCbs.add(cb);
+  return () => { goesCbs.delete(cb); };
+}
+
+/** Subscribe to Inmarsat STD-C state. Updates at 1530–1550 MHz. */
+export function onRealInmarsat(cb: (s: StdcState) => void): () => void {
+  inmarsatCbs.add(cb);
+  return () => { inmarsatCbs.delete(cb); };
+}
+
+/** Subscribe to GPS L1 state. Updates at 1570–1580 MHz. */
+export function onRealGps(cb: (s: GpsState) => void): () => void {
+  gpsCbs.add(cb);
+  return () => { gpsCbs.delete(cb); };
 }
 
 /** Subscribe to notch filter list changes. */

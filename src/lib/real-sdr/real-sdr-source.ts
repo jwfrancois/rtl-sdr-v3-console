@@ -18,6 +18,11 @@ import { AdsbDecoder, AdsbState } from "./adsb";
 import { AptDecoder, AptState, PIXELS_PER_LINE } from "./apt";
 import { PocsagDecoder, PocsagState } from "./pocsag";
 import { AcarsDecoder, AcarsState } from "./acars";
+import { HdRadioDecoder, HdRadioState } from "./hd-radio";
+import { MeteorDecoder, MeteorState } from "./meteor";
+import { GoesHritDecoder, HritState } from "./goes-hrit";
+import { InmarsatStdcDecoder, StdcState } from "./inmarsat-stdc";
+import { GpsDecoder, GpsState } from "./gps-l1";
 import { NotchFilter, NotchSpec } from "./notch-filter";
 import { DemodMode } from "@/lib/sdr-engine";
 
@@ -61,6 +66,31 @@ export class RealSdrSource implements SdrSource {
   private acarsCbs = new Set<(s: AcarsState) => void>();
   private lastAcarsEmit = 0;
 
+  // HD Radio SIS decoder — runs on broadcast FM (87.5–108 MHz)
+  private hdRadio: HdRadioDecoder;
+  private hdRadioCbs = new Set<(s: HdRadioState) => void>();
+  private lastHdRadioEmit = 0;
+
+  // Meteor M2 LRPT decoder — 137.1 / 137.9 MHz
+  private meteor: MeteorDecoder;
+  private meteorCbs = new Set<(s: MeteorState) => void>();
+  private lastMeteorEmit = 0;
+
+  // GOES HRIT decoder — 1685.7 / 1694.1 MHz
+  private goes: GoesHritDecoder;
+  private goesCbs = new Set<(s: HritState) => void>();
+  private lastGoesEmit = 0;
+
+  // Inmarsat STD-C decoder — 1537.5–1545 MHz
+  private inmarsat: InmarsatStdcDecoder;
+  private inmarsatCbs = new Set<(s: StdcState) => void>();
+  private lastInmarsatEmit = 0;
+
+  // GPS L1 C/A decoder — 1575.42 MHz
+  private gps: GpsDecoder;
+  private gpsCbs = new Set<(s: GpsState) => void>();
+  private lastGpsEmit = 0;
+
   // Notch filter — applied to IQ before demod
   private notch: NotchFilter;
   private notchCbs = new Set<(n: NotchSpec[]) => void>();
@@ -97,6 +127,11 @@ export class RealSdrSource implements SdrSource {
     this.apt = new AptDecoder();
     this.pocsag = new PocsagDecoder();
     this.acars = new AcarsDecoder();
+    this.hdRadio = new HdRadioDecoder();
+    this.meteor = new MeteorDecoder();
+    this.goes = new GoesHritDecoder();
+    this.inmarsat = new InmarsatStdcDecoder();
+    this.gps = new GpsDecoder();
     this.notch = new NotchFilter();
   }
 
@@ -144,6 +179,41 @@ export class RealSdrSource implements SdrSource {
     this.acarsCbs.add(cb);
     cb(this.acars.state);
     return () => this.acarsCbs.delete(cb);
+  }
+
+  /** Subscribe to HD Radio SIS state. */
+  onHdRadio(cb: (s: HdRadioState) => void): () => void {
+    this.hdRadioCbs.add(cb);
+    cb(this.hdRadio.state);
+    return () => this.hdRadioCbs.delete(cb);
+  }
+
+  /** Subscribe to Meteor M2 LRPT state. */
+  onMeteor(cb: (s: MeteorState) => void): () => void {
+    this.meteorCbs.add(cb);
+    cb(this.meteor.state);
+    return () => this.meteorCbs.delete(cb);
+  }
+
+  /** Subscribe to GOES HRIT state. */
+  onGoes(cb: (s: HritState) => void): () => void {
+    this.goesCbs.add(cb);
+    cb(this.goes.state);
+    return () => this.goesCbs.delete(cb);
+  }
+
+  /** Subscribe to Inmarsat STD-C state. */
+  onInmarsat(cb: (s: StdcState) => void): () => void {
+    this.inmarsatCbs.add(cb);
+    cb(this.inmarsat.state);
+    return () => this.inmarsatCbs.delete(cb);
+  }
+
+  /** Subscribe to GPS L1 state. */
+  onGps(cb: (s: GpsState) => void): () => void {
+    this.gpsCbs.add(cb);
+    cb(this.gps.state);
+    return () => this.gpsCbs.delete(cb);
   }
 
   /** Subscribe to notch filter list updates. */
@@ -341,6 +411,66 @@ export class RealSdrSource implements SdrSource {
       if (now - this.lastAcarsEmit > 500) {
         this.lastAcarsEmit = now;
         for (const cb of this.acarsCbs) cb(this.acars.state);
+      }
+    }
+
+    // 8.5) Run HD Radio SIS decoder on broadcast FM
+    if (
+      block.frequency >= 87.5e6 && block.frequency <= 108e6 &&
+      this.hdRadioCbs.size > 0
+    ) {
+      this.hdRadio.process(floatIQ, block.sampleRate);
+      if (now - this.lastHdRadioEmit > 500) {
+        this.lastHdRadioEmit = now;
+        for (const cb of this.hdRadioCbs) cb(this.hdRadio.state);
+      }
+    }
+
+    // 8.6) Run Meteor M2 LRPT decoder on 137-138 MHz (excluding NOAA APT freqs)
+    if (
+      block.frequency >= 137e6 && block.frequency <= 138e6 &&
+      this.meteorCbs.size > 0
+    ) {
+      this.meteor.process(floatIQ, block.sampleRate);
+      if (now - this.lastMeteorEmit > 500) {
+        this.lastMeteorEmit = now;
+        for (const cb of this.meteorCbs) cb(this.meteor.state);
+      }
+    }
+
+    // 8.7) Run GOES HRIT decoder at ~1685.7 MHz
+    if (
+      block.frequency >= 1680e6 && block.frequency <= 1700e6 &&
+      this.goesCbs.size > 0
+    ) {
+      this.goes.process(floatIQ, block.sampleRate);
+      if (now - this.lastGoesEmit > 500) {
+        this.lastGoesEmit = now;
+        for (const cb of this.goesCbs) cb(this.goes.state);
+      }
+    }
+
+    // 8.8) Run Inmarsat STD-C decoder on 1537-1545 MHz
+    if (
+      block.frequency >= 1530e6 && block.frequency <= 1550e6 &&
+      this.inmarsatCbs.size > 0
+    ) {
+      this.inmarsat.process(floatIQ, block.sampleRate);
+      if (now - this.lastInmarsatEmit > 500) {
+        this.lastInmarsatEmit = now;
+        for (const cb of this.inmarsatCbs) cb(this.inmarsat.state);
+      }
+    }
+
+    // 8.9) Run GPS L1 decoder at 1575.42 MHz
+    if (
+      block.frequency >= 1570e6 && block.frequency <= 1580e6 &&
+      this.gpsCbs.size > 0
+    ) {
+      this.gps.process(floatIQ, block.sampleRate);
+      if (now - this.lastGpsEmit > 500) {
+        this.lastGpsEmit = now;
+        for (const cb of this.gpsCbs) cb(this.gps.state);
       }
     }
 
