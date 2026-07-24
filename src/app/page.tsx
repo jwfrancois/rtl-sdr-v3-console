@@ -33,6 +33,7 @@ import { SolarConditionsPanel } from "@/components/sdr/solar-conditions-panel";
 import { TuningDial } from "@/components/sdr/tuning-dial";
 import { SdrcomMeter } from "@/components/sdr/sdrcom-meter";
 import { PresetProfilesPanel } from "@/components/sdr/preset-profiles-panel";
+import { GraphicEqPanel } from "@/components/sdr/graphic-eq-panel";
 import { useSdrStore, hydrateFromStorage } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -141,6 +142,9 @@ export default function Home() {
               <SignalMeter />
               <AudioOscilloscope height={64} />
             </div>
+
+            {/* Graphic EQ — 10-band with presets + frequency response curve */}
+            <GraphicEqPanel />
 
             {/* SDRCOM Receiver Meter (dBm/SNR/noise floor/peak) */}
             <SdrcomMeter />

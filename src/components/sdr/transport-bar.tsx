@@ -73,22 +73,31 @@ export function TransportBar({ level }: Props) {
 
   // Drive the simulated audio engine when in simulated mode (or real but
   // not connected yet — we still want some output during the demo).
+  // Track the last frequency we flushed for so we only flush on ACTUAL
+  // frequency changes — not on every re-render (which would constantly
+  // cancel in-flight audio and cause choppiness).
+  const lastFlushedFreqRef = useRef<number>(-1);
   useEffect(() => {
     const engine = getAudioEngine();
     const useReal = backend === "real" && hwConnected;
+    const freqChanged = frequency !== lastFlushedFreqRef.current;
     if (useReal) {
       // Switch to real mode — synth voices will be muted
       engine.setRealMode(true);
-      // On frequency change in real mode, flush pending audio so the new
-      // station plays immediately (no overlap with the old one).
-      engine.flushPendingAudio();
+      // Only flush on actual frequency change — flushing on every render
+      // causes choppiness by cancelling in-flight audio frames.
+      if (freqChanged) {
+        engine.flushPendingAudio();
+        lastFlushedFreqRef.current = frequency;
+      }
       return;
     }
-    // Simulated mode (or real-but-disconnected) — drive synth voices.
-    // On frequency change, also flush any pending synth voices so the new
-    // station's audio starts cleanly without overlapping with the old one.
+    // Simulated mode (or real-but-disconnected) — drive synth voices
     engine.setRealMode(false);
-    engine.flushPendingAudio();
+    if (freqChanged) {
+      engine.flushPendingAudio();
+      lastFlushedFreqRef.current = frequency;
+    }
     const station = findStationAt(frequency);
     const signal = station ? stationSignalAt(station, frequency) : 0;
     if (audioEnabled) {

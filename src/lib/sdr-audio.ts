@@ -82,6 +82,15 @@ export class SdrAudioEngine {
   private realGain: GainNode | null = null;
   /** Pending buffer sources — tracked so we can cancel them on tune. */
   private pendingSources: Set<AudioBufferSourceNode> = new Set();
+  /** EQ: 10 biquad filters chained, between realGain and masterGain. */
+  private eqFilters: BiquadFilterNode[] = [];
+  private eqInput: GainNode | null = null;
+  private eqOutput: GainNode | null = null;
+  private eqBypass = false;
+  private eqGains: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // dB per band
+
+  /** EQ band center frequencies (Hz) — standard ISO 1/3-octave spacing. */
+  static readonly EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
   setRealMode(enabled: boolean) {
     this.realMode = enabled;
@@ -93,7 +102,24 @@ export class SdrAudioEngine {
       if (!this.realGain) {
         this.realGain = ctx.createGain();
         this.realGain.gain.value = 1;
-        this.realGain.connect(this.masterGain!);
+        // Build the EQ chain: realGain -> eqInput -> [10 biquads] -> eqOutput -> masterGain
+        this.eqInput = ctx.createGain();
+        this.eqOutput = ctx.createGain();
+        this.eqFilters = [];
+        let prev: AudioNode = this.eqInput;
+        for (let i = 0; i < 10; i++) {
+          const filter = ctx.createBiquadFilter();
+          filter.type = "peaking";
+          filter.frequency.value = SdrAudioEngine.EQ_BANDS[i];
+          filter.Q.value = 1.41; // ~1 octave bandwidth
+          filter.gain.value = 0; // flat by default
+          prev.connect(filter);
+          prev = filter;
+          this.eqFilters.push(filter);
+        }
+        prev.connect(this.eqOutput);
+        this.realGain.connect(this.eqInput);
+        this.eqOutput.connect(this.masterGain!);
       }
       // Open the master gain so real audio is audible
       if (this.masterGain) {
@@ -101,15 +127,66 @@ export class SdrAudioEngine {
       }
       this.nextStartTime = Math.max(this.nextStartTime, ctx.currentTime + 0.02);
     } else {
-      // Tear down real-audio gain
+      // Tear down real-audio gain + EQ chain
       if (this.realGain) {
         try {
           this.realGain.disconnect();
         } catch {}
         this.realGain = null;
       }
+      if (this.eqInput) {
+        try { this.eqInput.disconnect(); } catch {}
+        this.eqInput = null;
+      }
+      if (this.eqOutput) {
+        try { this.eqOutput.disconnect(); } catch {}
+        this.eqOutput = null;
+      }
+      this.eqFilters = [];
       this.nextStartTime = 0;
     }
+  }
+
+  /** Set the gain (dB) for a specific EQ band (0-9). */
+  setEqBand(band: number, gainDb: number) {
+    if (band < 0 || band >= 10) return;
+    if (!this.eqFilters[band]) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.eqGains[band] = gainDb;
+    this.eqFilters[band].gain.setTargetAtTime(gainDb, ctx.currentTime, 0.02);
+  }
+
+  /** Set all 10 EQ band gains at once. */
+  setEqAll(gains: number[]) {
+    for (let i = 0; i < 10 && i < gains.length; i++) {
+      this.setEqBand(i, gains[i]);
+    }
+  }
+
+  /** Get the current EQ gains (copy). */
+  getEqGains(): number[] {
+    return [...this.eqGains];
+  }
+
+  /** Toggle EQ bypass (true = flat passthrough, false = active EQ). */
+  setEqBypass(bypass: boolean) {
+    this.eqBypass = bypass;
+    if (!this.ctx || !this.eqInput || !this.eqOutput || !this.realGain) return;
+    // We can't easily rewire in Web Audio, so just zero all gains when bypassing
+    for (let i = 0; i < 10; i++) {
+      if (this.eqFilters[i]) {
+        this.eqFilters[i].gain.setTargetAtTime(
+          bypass ? 0 : this.eqGains[i],
+          this.ctx.currentTime,
+          0.02,
+        );
+      }
+    }
+  }
+
+  getEqBypass(): boolean {
+    return this.eqBypass;
   }
 
   /**
@@ -129,8 +206,9 @@ export class SdrAudioEngine {
       } catch {}
     }
     this.pendingSources.clear();
-    // Reset the schedule so the next frame plays immediately
-    this.nextStartTime = this.ctx.currentTime + 0.005;
+    // Reset the schedule so the next frame plays with a small look-ahead
+    // (50ms — same as the buffer look-ahead, to absorb jitter).
+    this.nextStartTime = this.ctx.currentTime + 0.05;
   }
 
   /** Push a real demodulated audio frame into the output queue. */
@@ -146,8 +224,10 @@ export class SdrAudioEngine {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(this.realGain);
-    // Schedule back-to-back with previously queued frames
-    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.005);
+    // Schedule back-to-back with previously queued frames. The 50ms
+    // look-ahead (0.05s) absorbs minor network jitter and prevents
+    // underruns that cause choppy audio. Was 5ms which was too tight.
+    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.05);
     src.start(start);
     this.nextStartTime = start + samples.length / sampleRate;
     // Track for cancellation
