@@ -274,6 +274,43 @@ const httpServer = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, ws: USE_TLS ? "wss" : "ws", port: WS_PORT }));
     return;
   }
+  // Preset sync — bookmarks + scan presets stored as JSON
+  if (url.pathname === "/presets") {
+    const presetFile = path.join(process.cwd(), "presets.json");
+    if (req.method === "GET") {
+      try {
+        const data = fs.readFileSync(presetFile, "utf8");
+        res.setHeader("Content-Type", "application/json");
+        res.end(data);
+      } catch (err) {
+        if (err.code === "ENOENT") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ bookmarks: [], scanPresets: [] }));
+        } else {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      }
+      return;
+    }
+    if (req.method === "PUT") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); if (body.length > 1e6) req.destroy(); });
+      req.on("end", () => {
+        try {
+          // Validate it parses as JSON
+          JSON.parse(body);
+          fs.writeFileSync(presetFile, body);
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
   res.statusCode = 404;
   res.end("Not found");
 });

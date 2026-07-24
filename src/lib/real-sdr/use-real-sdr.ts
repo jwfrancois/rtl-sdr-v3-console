@@ -5,18 +5,23 @@ import { useSdrStore } from "@/lib/sdr-store";
 import { RealSdrSource } from "./real-sdr-source";
 import { AudioFrame, SdrStatus } from "./types";
 import { RdsState } from "./rds";
+import { AdsbState } from "./adsb";
+import { AptState } from "./apt";
+import { PocsagState } from "./pocsag";
+import { AcarsState } from "./acars";
+import { NotchSpec } from "./notch-filter";
 
 /**
- * Global callback sets for spectrum + audio + RDS.
- *
- * We use module-level sets (not tied to the source instance) so that
- * components can subscribe at mount time — even before the source exists
- * — and their callbacks will automatically receive data once the source
- * is created later (when the user switches to "real" mode).
+ * Global callback sets for all signal sources.
  */
 const spectrumCbs = new Set<(data: Float32Array, fc: number, sr: number) => void>();
 const audioCbs = new Set<(f: AudioFrame) => void>();
 const rdsCbs = new Set<(s: RdsState) => void>();
+const adsbCbs = new Set<(s: AdsbState) => void>();
+const aptCbs = new Set<(s: AptState) => void>();
+const pocsagCbs = new Set<(s: PocsagState) => void>();
+const acarsCbs = new Set<(s: AcarsState) => void>();
+const notchCbs = new Set<(n: NotchSpec[]) => void>();
 
 /**
  * Singleton holder for the RealSdrSource. The source is created on first
@@ -66,6 +71,51 @@ function getSource(bridgeUrl: string): RealSdrSource {
           cb(state);
         } catch (e) {
           console.error("[sdr] RDS callback error", e);
+        }
+      }
+    });
+    source.onAdsb((state) => {
+      for (const cb of adsbCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] ADS-B callback error", e);
+        }
+      }
+    });
+    source.onApt((state) => {
+      for (const cb of aptCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] APT callback error", e);
+        }
+      }
+    });
+    source.onPocsag((state) => {
+      for (const cb of pocsagCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] POCSAG callback error", e);
+        }
+      }
+    });
+    source.onAcars((state) => {
+      for (const cb of acarsCbs) {
+        try {
+          cb(state);
+        } catch (e) {
+          console.error("[sdr] ACARS callback error", e);
+        }
+      }
+    });
+    source.onNotch((notches) => {
+      for (const cb of notchCbs) {
+        try {
+          cb(notches);
+        } catch (e) {
+          console.error("[sdr] notch callback error", e);
         }
       }
     });
@@ -244,4 +294,62 @@ export function onRealRds(cb: (s: RdsState) => void): () => void {
   return () => {
     rdsCbs.delete(cb);
   };
+}
+
+/** Subscribe to ADS-B aircraft state. Updates when tuned to ~1090 MHz. */
+export function onRealAdsb(cb: (s: AdsbState) => void): () => void {
+  adsbCbs.add(cb);
+  return () => { adsbCbs.delete(cb); };
+}
+
+/** Subscribe to APT image updates. Updates when tuned to 137–138 MHz. */
+export function onRealApt(cb: (s: AptState) => void): () => void {
+  aptCbs.add(cb);
+  return () => { aptCbs.delete(cb); };
+}
+
+/** Subscribe to POCSAG pager messages. Updates when tuned to pager bands. */
+export function onRealPocsag(cb: (s: PocsagState) => void): () => void {
+  pocsagCbs.add(cb);
+  return () => { pocsagCbs.delete(cb); };
+}
+
+/** Subscribe to ACARS messages. Updates when tuned to 131–132 MHz. */
+export function onRealAcars(cb: (s: AcarsState) => void): () => void {
+  acarsCbs.add(cb);
+  return () => { acarsCbs.delete(cb); };
+}
+
+/** Subscribe to notch filter list changes. */
+export function onRealNotch(cb: (n: NotchSpec[]) => void): () => void {
+  notchCbs.add(cb);
+  return () => { notchCbs.delete(cb); };
+}
+
+/** Add a manual notch at a frequency offset (Hz). */
+export function addRealNotch(freqHz: number, q: number = 30) {
+  if (!source) return;
+  source.addNotch(freqHz, q);
+}
+
+/** Remove a notch at a frequency offset (Hz). */
+export function removeRealNotch(freqHz: number) {
+  if (!source) return;
+  source.removeNotch(freqHz);
+}
+
+/** Clear all auto-detected notches. */
+export function clearRealAutoNotches() {
+  if (!source) return;
+  source.clearAutoNotches();
+}
+
+/** Configure the notch filter. */
+export function configureRealNotch(opts: {
+  autoDetect?: boolean;
+  autoDetectMinDb?: number;
+  autoDetectMinSpacingHz?: number;
+}) {
+  if (!source) return;
+  source.configureNotch(opts);
 }

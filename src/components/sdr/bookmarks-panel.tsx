@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { STATIONS, formatFrequency } from "@/lib/sdr-engine";
-import { Bookmark, Star, Trash2, Plus, Search, Radio } from "lucide-react";
+import { Bookmark, Star, Trash2, Plus, Search, Radio, CloudUpload, CloudDownload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Tab = "stations" | "bookmarks" | "history";
@@ -11,6 +11,7 @@ type Tab = "stations" | "bookmarks" | "history";
 export function BookmarksPanel() {
   const [tab, setTab] = useState<Tab>("stations");
   const [query, setQuery] = useState("");
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const frequency = useSdrStore((s) => s.frequency);
   const setFrequency = useSdrStore((s) => s.setFrequency);
   const setDemod = useSdrStore((s) => s.setDemod);
@@ -22,6 +23,53 @@ export function BookmarksPanel() {
   const history = useSdrStore((s) => s.history);
   const demod = useSdrStore((s) => s.demod);
   const bandwidth = useSdrStore((s) => s.bandwidth);
+  const backend = useSdrStore((s) => s.backend);
+  const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
+  const bridgeUrl = useSdrStore((s) => s.bridgeUrl);
+
+  // Compute the bridge HTTP URL (replaces ws:// with http://, port + 1)
+  const httpUrl = backend === "real" && hwConnected
+    ? bridgeUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/:\d+$/, (m) => `:${Number(m.slice(1)) + 1}`)
+    : null;
+
+  // Sync: pull bookmarks from the bridge on mount
+  const handlePullFromBridge = async () => {
+    if (!httpUrl) return;
+    setSyncMsg("Pulling…");
+    try {
+      const res = await fetch(`${httpUrl}/presets`);
+      const data = await res.json();
+      if (data.bookmarks && Array.isArray(data.bookmarks) && data.bookmarks.length > 0) {
+        // Replace our bookmarks with the bridge's
+        useSdrStore.setState((s) => ({ bookmarks: data.bookmarks }));
+        setSyncMsg(`Loaded ${data.bookmarks.length} from bridge`);
+      } else {
+        setSyncMsg("No presets on bridge");
+      }
+    } catch (err) {
+      setSyncMsg("Pull failed");
+    }
+    window.setTimeout(() => setSyncMsg(null), 2000);
+  };
+
+  // Sync: push bookmarks to the bridge
+  const handlePushToBridge = async () => {
+    if (!httpUrl) return;
+    setSyncMsg("Pushing…");
+    try {
+      const payload = { bookmarks, scanPresets: [], savedAt: Date.now() };
+      const res = await fetch(`${httpUrl}/presets`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) setSyncMsg(`Saved ${bookmarks.length} to bridge`);
+      else setSyncMsg("Push failed");
+    } catch (err) {
+      setSyncMsg("Push failed");
+    }
+    window.setTimeout(() => setSyncMsg(null), 2000);
+  };
 
   const filteredStations = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -51,9 +99,31 @@ export function BookmarksPanel() {
           <Bookmark className="h-3.5 w-3.5 text-[oklch(0.85_0.18_195)]" />
           <span>Memory Bank</span>
         </div>
-        <span className="text-[10px] sdr-mono text-[oklch(0.55_0.04_250)]">
-          {tab === "stations" ? `${filteredStations.length} ch` : tab === "bookmarks" ? `${bookmarks.length} saved` : `${history.length} recent`}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {httpUrl && (
+            <>
+              <button
+                type="button"
+                onClick={handlePullFromBridge}
+                className="p-1 rounded text-[oklch(0.65_0.04_250)] hover:text-[oklch(0.85_0.18_195)] hover:bg-[oklch(0.85_0.18_195/0.1)] transition-all"
+                title="Pull bookmarks from bridge (sync from another device)"
+              >
+                <CloudDownload className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handlePushToBridge}
+                className="p-1 rounded text-[oklch(0.65_0.04_250)] hover:text-[oklch(0.85_0.18_195)] hover:bg-[oklch(0.85_0.18_195/0.1)] transition-all"
+                title="Save bookmarks to bridge (sync to other devices)"
+              >
+                <CloudUpload className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
+          <span className="text-[10px] sdr-mono text-[oklch(0.55_0.04_250)]">
+            {syncMsg ?? (tab === "stations" ? `${filteredStations.length} ch` : tab === "bookmarks" ? `${bookmarks.length} saved` : `${history.length} recent`)}
+          </span>
+        </div>
       </div>
 
       {/* Tabs */}

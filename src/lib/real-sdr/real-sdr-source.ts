@@ -14,6 +14,11 @@ import {
   bytesToFloatIQ,
 } from "./demodulators";
 import { RdsDecoder, RdsState } from "./rds";
+import { AdsbDecoder, AdsbState } from "./adsb";
+import { AptDecoder, AptState, PIXELS_PER_LINE } from "./apt";
+import { PocsagDecoder, PocsagState } from "./pocsag";
+import { AcarsDecoder, AcarsState } from "./acars";
+import { NotchFilter, NotchSpec } from "./notch-filter";
 import { DemodMode } from "@/lib/sdr-engine";
 
 /**
@@ -42,6 +47,26 @@ export class RealSdrSource implements SdrSource {
   private rdsCbs = new Set<(s: RdsState) => void>();
   private lastRdsEmit = 0;
 
+  // Other decoders — each runs based on the current frequency/mode
+  private adsb: AdsbDecoder;
+  private adsbCbs = new Set<(s: AdsbState) => void>();
+  private lastAdsbEmit = 0;
+  private apt: AptDecoder;
+  private aptCbs = new Set<(s: AptState) => void>();
+  private lastAptEmit = 0;
+  private pocsag: PocsagDecoder;
+  private pocsagCbs = new Set<(s: PocsagState) => void>();
+  private lastPocsagEmit = 0;
+  private acars: AcarsDecoder;
+  private acarsCbs = new Set<(s: AcarsState) => void>();
+  private lastAcarsEmit = 0;
+
+  // Notch filter — applied to IQ before demod
+  private notch: NotchFilter;
+  private notchCbs = new Set<(n: NotchSpec[]) => void>();
+  private lastNotchEmit = 0;
+  private autoNotchLastRun = 0;
+
   // Subscribers
   private spectrumCbs = new Set<(d: Float32Array, fc: number, sr: number) => void>();
   private audioCbs = new Set<(f: AudioFrame) => void>();
@@ -68,6 +93,11 @@ export class RealSdrSource implements SdrSource {
     this.bandwidth = 180e3;
     this.demod = createDemodulator(this.demodKind, this.bandwidth);
     this.rds = new RdsDecoder();
+    this.adsb = new AdsbDecoder();
+    this.apt = new AptDecoder();
+    this.pocsag = new PocsagDecoder();
+    this.acars = new AcarsDecoder();
+    this.notch = new NotchFilter();
   }
 
   /** Set the demodulator mode + bandwidth. Recreates the demod instance. */
@@ -86,6 +116,81 @@ export class RealSdrSource implements SdrSource {
     this.rdsCbs.add(cb);
     cb(this.rds.state);
     return () => this.rdsCbs.delete(cb);
+  }
+
+  /** Subscribe to ADS-B state updates (aircraft positions). */
+  onAdsb(cb: (s: AdsbState) => void): () => void {
+    this.adsbCbs.add(cb);
+    cb(this.adsb.state);
+    return () => this.adsbCbs.delete(cb);
+  }
+
+  /** Subscribe to APT image updates (NOAA weather satellite). */
+  onApt(cb: (s: AptState) => void): () => void {
+    this.aptCbs.add(cb);
+    cb(this.apt.state);
+    return () => this.aptCbs.delete(cb);
+  }
+
+  /** Subscribe to POCSAG pager messages. */
+  onPocsag(cb: (s: PocsagState) => void): () => void {
+    this.pocsagCbs.add(cb);
+    cb(this.pocsag.state);
+    return () => this.pocsagCbs.delete(cb);
+  }
+
+  /** Subscribe to ACARS aircraft messaging. */
+  onAcars(cb: (s: AcarsState) => void): () => void {
+    this.acarsCbs.add(cb);
+    cb(this.acars.state);
+    return () => this.acarsCbs.delete(cb);
+  }
+
+  /** Subscribe to notch filter list updates. */
+  onNotch(cb: (n: NotchSpec[]) => void): () => void {
+    this.notchCbs.add(cb);
+    cb(this.notch.getNotches());
+    return () => this.notchCbs.delete(cb);
+  }
+
+  /** Add a manual notch at the given offset. */
+  addNotch(freqHz: number, q: number = 30) {
+    this.notch.addNotch(freqHz, q, false);
+    this.emitNotch();
+  }
+
+  /** Remove a notch at the given offset. */
+  removeNotch(freqHz: number) {
+    this.notch.removeNotch(freqHz);
+    this.emitNotch();
+  }
+
+  /** Clear all auto-detected notches. */
+  clearAutoNotches() {
+    this.notch.clearAutoNotches();
+    this.emitNotch();
+  }
+
+  /** Configure the notch filter. */
+  configureNotch(opts: {
+    sampleRate?: number;
+    autoDetect?: boolean;
+    autoDetectMinDb?: number;
+    autoDetectMinSpacingHz?: number;
+  }) {
+    const sampleRate = opts.sampleRate ?? this.currentStatus.sampleRate ?? 2.4e6;
+    this.notch.configure({
+      sampleRate,
+      autoDetect: opts.autoDetect,
+      autoDetectMinDb: opts.autoDetectMinDb,
+      autoDetectMinSpacingHz: opts.autoDetectMinSpacingHz,
+    });
+    this.emitNotch();
+  }
+
+  private emitNotch() {
+    const notches = this.notch.getNotches();
+    for (const cb of this.notchCbs) cb(notches);
   }
 
   connect(): Promise<void> {
@@ -167,27 +272,85 @@ export class RealSdrSource implements SdrSource {
   };
 
   private processBlock(block: IQBlock) {
-    // 1) Compute spectrum
+    // 1) Compute spectrum (on raw IQ, before notch — so we still SEE the interferers)
     computeSpectrumDbfs(block.data, this.spectrumBuf);
     for (const cb of this.spectrumCbs) {
       cb(this.spectrumBuf, block.frequency, block.sampleRate);
     }
 
-    // 2) Convert to float IQ
-    const floatIQ = bytesToFloatIQ(block.data);
+    // 2) Auto-detect notches from the spectrum (run ~10 Hz)
+    const now = performance.now();
+    if (now - this.autoNotchLastRun > 100) {
+      this.autoNotchLastRun = now;
+      this.notch.autoDetectFromSpectrum(this.spectrumBuf, block.frequency, block.sampleRate);
+    }
 
-    // 3) Run RDS decoder only in WFM mode (broadcast FM)
+    // 3) Convert to float IQ and apply notch filter (in place)
+    const floatIQ = bytesToFloatIQ(block.data);
+    this.notch.configure({
+      sampleRate: block.sampleRate,
+    });
+    this.notch.process(floatIQ);
+
+    // 4) Run RDS decoder only in WFM mode (broadcast FM)
     if (this.demodKind === "WFM" && this.rdsCbs.size > 0) {
       this.rds.process(floatIQ, block.sampleRate);
-      // Throttle RDS state emission to ~5 Hz — RDS only updates ~1 Hz anyway
-      const now = performance.now();
       if (now - this.lastRdsEmit > 200) {
         this.lastRdsEmit = now;
         for (const cb of this.rdsCbs) cb(this.rds.state);
       }
     }
 
-    // 4) Demodulate audio
+    // 5) Run ADS-B decoder if tuned to ~1090 MHz
+    if (block.frequency > 1080e6 && block.frequency < 1100e6 && this.adsbCbs.size > 0) {
+      this.adsb.process(floatIQ, block.sampleRate);
+      if (now - this.lastAdsbEmit > 300) {
+        this.lastAdsbEmit = now;
+        for (const cb of this.adsbCbs) cb(this.adsb.state);
+      }
+    }
+
+    // 6) Run APT decoder if tuned to 137-138 MHz
+    if (block.frequency >= 137e6 && block.frequency <= 138e6 && this.aptCbs.size > 0) {
+      this.apt.process(floatIQ, block.sampleRate);
+      if (now - this.lastAptEmit > 500) {
+        this.lastAptEmit = now;
+        for (const cb of this.aptCbs) cb(this.apt.state);
+      }
+    }
+
+    // 7) Run POCSAG decoder if tuned to 929-932 MHz (US pager band) or 138-174 MHz
+    if (
+      ((block.frequency >= 929e6 && block.frequency <= 932e6) ||
+       (block.frequency >= 138e6 && block.frequency <= 174e6)) &&
+      this.pocsagCbs.size > 0
+    ) {
+      this.pocsag.process(floatIQ, block.sampleRate);
+      if (now - this.lastPocsagEmit > 500) {
+        this.lastPocsagEmit = now;
+        for (const cb of this.pocsagCbs) cb(this.pocsag.state);
+      }
+    }
+
+    // 8) Run ACARS decoder if tuned to ~131.55 MHz
+    if (
+      block.frequency >= 131e6 && block.frequency <= 132e6 &&
+      this.acarsCbs.size > 0
+    ) {
+      this.acars.process(floatIQ, block.sampleRate);
+      if (now - this.lastAcarsEmit > 500) {
+        this.lastAcarsEmit = now;
+        for (const cb of this.acarsCbs) cb(this.acars.state);
+      }
+    }
+
+    // 9) Emit notch list (throttled)
+    if (now - this.lastNotchEmit > 1000) {
+      this.lastNotchEmit = now;
+      this.emitNotch();
+    }
+
+    // 10) Demodulate audio (on notched IQ)
     const result = this.demod.process(floatIQ, block.sampleRate);
     const frame: AudioFrame = {
       samples: result.audio,

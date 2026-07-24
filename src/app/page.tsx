@@ -17,6 +17,12 @@ import { RdsOverlay } from "@/components/sdr/rds-overlay";
 import { RecordingPanel } from "@/components/sdr/recording-panel";
 import { ScannerPanel } from "@/components/sdr/scanner-panel";
 import { FullscreenSpectrum } from "@/components/sdr/fullscreen-spectrum";
+import { AdsbPanel } from "@/components/sdr/adsb-panel";
+import { AptPanel } from "@/components/sdr/apt-panel";
+import { MessagesPanel } from "@/components/sdr/messages-panel";
+import { NotchFilterPanel } from "@/components/sdr/notch-filter-panel";
+import { AudioRecorder } from "@/components/sdr/audio-recorder";
+import { KeyboardShortcuts } from "@/components/sdr/keyboard-shortcuts";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -38,12 +44,13 @@ export default function Home() {
 
         {/* Main grid */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* LEFT column: connection + tuner + demod + gain + scanner */}
+          {/* LEFT column: connection + tuner + demod + gain + notch + scanner */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
             <ConnectionPanel />
             <FrequencyTuner />
             <DemodulatorControls />
             <GainControls />
+            <NotchFilterPanel />
             <ScannerPanel />
           </aside>
 
@@ -112,12 +119,22 @@ export default function Home() {
               <SignalMeter />
               <AudioOscilloscope height={64} />
             </div>
+
+            {/* ADS-B tracker (only shows when tuned to 1090 MHz) */}
+            <AdsbPanel />
+
+            {/* APT weather satellite decoder (only shows at 137 MHz) */}
+            <AptPanel />
           </section>
 
-          {/* RIGHT column: station card + recording + bookmarks */}
+          {/* RIGHT column: station card + audio recorder + recording + messages + bookmarks */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
             <ActiveStationCard />
-            <RecordingPanel />
+            <div>
+              <RecordingPanel />
+              <AudioRecorder />
+            </div>
+            <MessagesPanel />
             <BookmarksPanel />
           </aside>
         </div>
@@ -143,6 +160,9 @@ export default function Home() {
           </div>
         </footer>
       </div>
+
+      {/* Floating keyboard shortcuts button + help overlay */}
+      <KeyboardShortcuts />
     </main>
   );
 }
