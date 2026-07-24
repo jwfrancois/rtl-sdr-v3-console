@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFreqAxis, generateSpectrum } from "@/lib/sdr-engine";
+import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
 
 interface Props {
   height?: number;
@@ -30,18 +31,39 @@ export function SpectrumAnalyzer({ height = 220, onSeek, onHover }: Props) {
   const bandwidth = useSdrStore((s) => s.bandwidth);
   const demod = useSdrStore((s) => s.demod);
   const running = useSdrStore((s) => s.running);
+  const backend = useSdrStore((s) => s.backend);
+  const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
   const setFrequency = useSdrStore((s) => s.setFrequency);
 
   // Keep latest settings in a ref so the animation loop reads fresh values
   // without being recreated on every render.
   const stateRef = useRef({
     frequency, sampleRate, gainDb, autoGain, bandwidth, demod, running, height,
+    backend, hwConnected,
   });
   useEffect(() => {
     stateRef.current = {
       frequency, sampleRate, gainDb, autoGain, bandwidth, demod, running, height,
+      backend, hwConnected,
     };
-  }, [frequency, sampleRate, gainDb, autoGain, bandwidth, demod, running, height]);
+  }, [frequency, sampleRate, gainDb, autoGain, bandwidth, demod, running, height, backend, hwConnected]);
+
+  // Subscribe to real-SDR spectrum updates and stash the latest data.
+  // The animation loop will pick it up via realSpectrumRef.
+  const realSpectrumRef = useRef<Float32Array | null>(null);
+  const realFreqRef = useRef<{ freq: number; sr: number }>({ freq: 0, sr: 0 });
+  useEffect(() => {
+    const unsub = onRealSpectrum((data, fc, sr) => {
+      // The real source emits 512 bins (1024-pt FFT, positive half).
+      // Copy into our local buffer so the rAF loop reads a stable snapshot.
+      if (realSpectrumRef.current === null || realSpectrumRef.current.length !== data.length) {
+        realSpectrumRef.current = new Float32Array(data.length);
+      }
+      realSpectrumRef.current.set(data);
+      realFreqRef.current = { freq: fc, sr };
+    });
+    return unsub;
+  }, []);
 
   // Single mount effect that owns the rAF loop.
   useEffect(() => {
@@ -71,7 +93,21 @@ export function SpectrumAnalyzer({ height = 220, onSeek, onHover }: Props) {
 
       const s = stateRef.current;
       const now = performance.now();
-      if (s.running) {
+      const useReal = s.backend === "real" && s.hwConnected && realSpectrumRef.current !== null;
+      if (useReal) {
+        // Use the real spectrum from the IQ stream. The real source emits
+        // bins in the range [0, fftSize/2) corresponding to positive
+        // frequencies [0, sampleRate/2). We mirror them into the SIZE-wide
+        // display buffer so the negative half is the symmetric mirror.
+        const real = realSpectrumRef.current!;
+        const n = real.length;
+        for (let i = 0; i < SIZE; i++) {
+          // Map bin i in [0, SIZE) to a position in [-n, n) and take abs
+          const pos = i < SIZE / 2 ? SIZE / 2 - 1 - i : i - SIZE / 2;
+          const binIdx = Math.min(n - 1, pos);
+          lastSpectrumRef.current[i] = real[binIdx];
+        }
+      } else if (s.running) {
         const effGain = s.autoGain ? 35 : s.gainDb;
         lastSpectrumRef.current = generateSpectrum(
           s.frequency,
@@ -230,10 +266,12 @@ export function SpectrumAnalyzer({ height = 220, onSeek, onHover }: Props) {
       ctx.shadowBlur = 0;
 
       // Mode label
-      ctx.fillStyle = "rgba(180, 220, 255, 0.85)";
+      ctx.fillStyle = useReal
+        ? "rgba(180, 240, 200, 0.95)"
+        : "rgba(180, 220, 255, 0.85)";
       ctx.font = "11px monospace";
       ctx.fillText(
-        `${s.demod} • BW ${(s.bandwidth / 1e3).toFixed(1)} kHz • SR ${(s.sampleRate / 1e6).toFixed(2)} Msps`,
+        `${useReal ? "● LIVE HW" : "○ SIM"} · ${s.demod} • BW ${(s.bandwidth / 1e3).toFixed(1)} kHz • SR ${(s.sampleRate / 1e6).toFixed(2)} Msps`,
         32,
         22,
       );

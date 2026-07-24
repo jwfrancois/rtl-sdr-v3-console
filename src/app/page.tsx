@@ -12,6 +12,7 @@ import { SignalMeter } from "@/components/sdr/signal-meter";
 import { BookmarksPanel } from "@/components/sdr/bookmarks-panel";
 import { ActiveStationCard } from "@/components/sdr/active-station-card";
 import { AudioOscilloscope } from "@/components/sdr/audio-oscilloscope";
+import { ConnectionPanel } from "@/components/sdr/connection-panel";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair } from "lucide-react";
@@ -29,8 +30,9 @@ export default function Home() {
 
         {/* Main grid */}
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
-          {/* LEFT column: tuner + demod + gain */}
+          {/* LEFT column: connection + tuner + demod + gain */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
+            <ConnectionPanel />
             <FrequencyTuner />
             <DemodulatorControls />
             <GainControls />

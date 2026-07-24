@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { getAudioEngine } from "@/lib/sdr-audio";
+import { onRealAudio } from "@/lib/real-sdr/use-real-sdr";
 import { Play, Pause, Volume2, VolumeX, Circle, Headphones } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,28 +28,53 @@ export function TransportBar({ level }: Props) {
   const recording = useSdrStore((s) => s.recording);
   const toggleRecording = useSdrStore((s) => s.toggleRecording);
   const frequency = useSdrStore((s) => s.frequency);
+  const backend = useSdrStore((s) => s.backend);
+  const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
 
   const audioReadyRef = useRef(false);
+  const settingsRef = useRef({ audioEnabled, volume, backend, hwConnected });
+  useEffect(() => {
+    settingsRef.current = { audioEnabled, volume, backend, hwConnected };
+  }, [audioEnabled, volume, backend, hwConnected]);
 
-  // Drive the audio engine with the current station + signal + volume
+  // Subscribe to real-audio frames and push them to the audio engine
+  useEffect(() => {
+    const unsub = onRealAudio((frame) => {
+      const s = settingsRef.current;
+      if (s.backend !== "real" || !s.hwConnected || !s.audioEnabled) return;
+      const engine = getAudioEngine();
+      engine.setRealMode(true);
+      engine.pushRealAudioFrame(frame.samples, frame.sampleRate, s.volume);
+    });
+    return unsub;
+  }, []);
+
+  // Drive the simulated audio engine when in simulated mode (or real but
+  // not connected yet — we still want some output during the demo).
   useEffect(() => {
     const engine = getAudioEngine();
+    const useReal = backend === "real" && hwConnected;
+    if (useReal) {
+      // Switch to real mode — synth voices will be muted
+      engine.setRealMode(true);
+      return;
+    }
+    // Simulated mode (or real-but-disconnected) — drive synth voices
+    engine.setRealMode(false);
     const station = findStationAt(frequency);
     const signal = station ? stationSignalAt(station, frequency) : 0;
-
     if (audioEnabled) {
       engine.start().then(() => {
         audioReadyRef.current = true;
       });
     }
-    // Always update the engine — it will gate its gain to 0 if disabled
     const effectiveSignal = audioEnabled ? signal : 0;
     const effectiveVol = audioEnabled ? volume : 0;
     engine.setStation(audioEnabled ? station : null, effectiveSignal, effectiveVol);
     if (!audioEnabled) {
       engine.stop();
     }
-  }, [frequency, audioEnabled, volume]);
+  }, [frequency, audioEnabled, volume, backend, hwConnected]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -88,9 +114,14 @@ export function TransportBar({ level }: Props) {
       <button
         type="button"
         onClick={async () => {
-          // Always resume the context on a user gesture
+          // Always resume the AudioContext on a user gesture (browsers
+          // require this). In real mode we also flip the engine into real
+          // mode so incoming IQ audio is routed through.
           if (!audioEnabled) {
             await getAudioEngine().start();
+            if (backend === "real" && hwConnected) {
+              getAudioEngine().setRealMode(true);
+            }
           }
           setAudioEnabled(!audioEnabled);
         }}

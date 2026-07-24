@@ -9,6 +9,7 @@ import {
   STATIONS,
   findStationAt,
 } from "./sdr-engine";
+import type { SdrStatus } from "./real-sdr/types";
 
 export interface Bookmark {
   id: string;
@@ -33,6 +34,8 @@ export interface SdrSettings {
   agcSpeed: "slow" | "medium" | "fast";
   running: boolean;
 }
+
+export type SdrBackend = "simulated" | "real";
 
 interface SdrState extends SdrSettings {
   // Setters
@@ -65,6 +68,18 @@ interface SdrState extends SdrSettings {
 
   // Helpers
   tuneStep: (direction: 1 | -1, stepHz: number) => void;
+
+  // Real-SDR connection state
+  backend: SdrBackend;
+  bridgeUrl: string;
+  bridgeConnecting: boolean;
+  bridgeError: string | null;
+  hwStatus: SdrStatus | null;
+  setBackend: (b: SdrBackend) => void;
+  setBridgeUrl: (u: string) => void;
+  setBridgeConnecting: (b: boolean) => void;
+  setBridgeError: (e: string | null) => void;
+  setHwStatus: (s: SdrStatus | null) => void;
 }
 
 const DEFAULT_BOOKMARKS: Bookmark[] = [
@@ -190,6 +205,18 @@ export const useSdrStore = create<SdrState>((set, get) => ({
     set((s) => ({
       frequency: clamp(s.frequency + direction * stepHz, FREQ_MIN, FREQ_MAX),
     })),
+
+  // Real-SDR connection state
+  backend: "simulated",
+  bridgeUrl: "ws://localhost:8080",
+  bridgeConnecting: false,
+  bridgeError: null,
+  hwStatus: null,
+  setBackend: (b) => set({ backend: b }),
+  setBridgeUrl: (u) => set({ bridgeUrl: u }),
+  setBridgeConnecting: (b) => set({ bridgeConnecting: b }),
+  setBridgeError: (e) => set({ bridgeError: e }),
+  setHwStatus: (s) => set({ hwStatus: s }),
 }));
 
 /** Select the strongest station currently under the cursor, if any. */

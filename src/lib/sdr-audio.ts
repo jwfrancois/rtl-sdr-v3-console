@@ -63,6 +63,78 @@ export class SdrAudioEngine {
     return !!this.ctx && this.ctx.state === "running";
   }
 
+  /**
+   * Push a frame of real demodulated audio (from the IQ stream) into the
+   * output. We schedule it back-to-back with the previously queued frame
+   * so playback is continuous.
+   *
+   * The audio frame is mono Float32 PCM at `frame.sampleRate` Hz. We
+   * create an AudioBuffer, copy the samples in, and connect a
+   * BufferSourceNode through the master gain (which the parent sets
+   * based on volume + signal).
+   *
+   * When in real mode, the synth voices should be silent — the caller is
+   * responsible for switching the engine into real mode by calling
+   * `setRealMode(true)`.
+   */
+  private realMode = false;
+  private nextStartTime = 0;
+  private realGain: GainNode | null = null;
+
+  setRealMode(enabled: boolean) {
+    this.realMode = enabled;
+    if (enabled) {
+      // Mute the synth voices
+      this.setStation(null, 0, 0);
+      // Ensure the real-audio gain node exists
+      const ctx = this.ensureCtx();
+      if (!this.realGain) {
+        this.realGain = ctx.createGain();
+        this.realGain.gain.value = 1;
+        this.realGain.connect(this.masterGain!);
+      }
+      // Open the master gain so real audio is audible
+      if (this.masterGain) {
+        this.masterGain.gain.setTargetAtTime(1, ctx.currentTime, 0.05);
+      }
+      this.nextStartTime = Math.max(this.nextStartTime, ctx.currentTime + 0.02);
+    } else {
+      // Tear down real-audio gain
+      if (this.realGain) {
+        try {
+          this.realGain.disconnect();
+        } catch {}
+        this.realGain = null;
+      }
+      this.nextStartTime = 0;
+    }
+  }
+
+  /** Push a real demodulated audio frame into the output queue. */
+  pushRealAudioFrame(samples: Float32Array, sampleRate: number, volume: number) {
+    if (!this.realMode || !this.ctx || !this.masterGain || !this.realGain) return;
+    const ctx = this.ctx;
+    // Update volume via the realGain (don't touch masterGain — that's our
+    // global gate)
+    this.realGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.03);
+
+    const buf = ctx.createBuffer(1, samples.length, sampleRate);
+    buf.copyToChannel(samples, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(this.realGain);
+    // Schedule back-to-back with previously queued frames
+    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.005);
+    src.start(start);
+    this.nextStartTime = start + samples.length / sampleRate;
+    // Cleanup source after it finishes
+    src.onended = () => {
+      try {
+        src.disconnect();
+      } catch {}
+    };
+  }
+
   getOutputLevels(): Uint8Array | null {
     if (!this.analyser || !this.outputFreqData) return null;
     this.analyser.getByteFrequencyData(this.outputFreqData);

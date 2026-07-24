@@ -1,0 +1,16 @@
+{
+  "name": "rtl-sdr-bridge",
+  "version": "1.0.0",
+  "description": "WebSocket bridge that exposes a local rtl_tcp stream to the RTL-SDR V3 web console.",
+  "type": "module",
+  "main": "bridge.mjs",
+  "bin": {
+    "sdr-bridge": "bridge.mjs"
+  },
+  "scripts": {
+    "start": "node bridge.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}

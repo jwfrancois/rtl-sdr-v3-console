@@ -58,18 +58,25 @@ export function StatusHeader() {
 
   const station = findStationAt(frequency);
   const band = bandForFrequency(frequency);
+  const backend = useSdrStore((s) => s.backend);
+  const hwStatus = useSdrStore((s) => s.hwStatus);
+  const hwConnected = !!hwStatus?.connected;
 
-  // Mock: SNR derived from signal strength (just for header display)
+  // Mock: SNR derived from signal strength (just for header display in sim mode).
+  // In real mode, the HW overruns + uptime tell us the device is healthy.
   const signal = station ? station.power : 0;
   const snr = Math.max(0, signal * 30 + 3);
 
   const stats = [
+    { label: "Source", value: backend === "real" && hwConnected ? "HW LIVE" : backend === "real" ? "HW OFFLINE" : "SIMULATED" },
     { label: "Band", value: band },
     { label: "Mode", value: demod },
     { label: "Sample Rate", value: `${(sampleRate / 1e6).toFixed(2)} M` },
     { label: "Gain", value: autoGain ? "Auto" : `${gainDb.toFixed(1)} dB` },
     { label: "PPM", value: `${ppmCorrection > 0 ? "+" : ""}${ppmCorrection}` },
-    { label: "SNR", value: `${snr.toFixed(1)} dB` },
+    ...(backend === "real" && hwConnected && hwStatus
+      ? [{ label: "HW Uptime", value: `${hwStatus.uptime.toFixed(0)}s` }]
+      : [{ label: "SNR", value: `${snr.toFixed(1)} dB` }]),
   ];
 
   return (
@@ -117,7 +124,7 @@ export function StatusHeader() {
         <div className="flex-1 hidden md:block" />
 
         {/* Live stats grid */}
-        <div className="hidden md:grid grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="hidden md:grid grid-cols-3 lg:grid-cols-7 gap-3">
           {stats.map((s) => (
             <div key={s.label} className="flex flex-col leading-tight min-w-[64px]">
               <span className="text-[9px] uppercase tracking-wider text-[oklch(0.5_0.04_250)]">

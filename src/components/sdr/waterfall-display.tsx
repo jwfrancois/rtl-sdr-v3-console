@@ -8,6 +8,7 @@ import {
   generateSpectrum,
   waterfallColor,
 } from "@/lib/sdr-engine";
+import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
 
 interface Props {
   height?: number;
@@ -31,16 +32,32 @@ export function WaterfallDisplay({ height = 280, onSeek, onHover }: Props) {
   const autoGain = useSdrStore((s) => s.autoGain);
   const bandwidth = useSdrStore((s) => s.bandwidth);
   const running = useSdrStore((s) => s.running);
+  const backend = useSdrStore((s) => s.backend);
+  const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
   const setFrequency = useSdrStore((s) => s.setFrequency);
 
   const stateRef = useRef({
     frequency, sampleRate, gainDb, autoGain, bandwidth, running, height,
+    backend, hwConnected,
   });
   useEffect(() => {
     stateRef.current = {
       frequency, sampleRate, gainDb, autoGain, bandwidth, running, height,
+      backend, hwConnected,
     };
-  }, [frequency, sampleRate, gainDb, autoGain, bandwidth, running, height]);
+  }, [frequency, sampleRate, gainDb, autoGain, bandwidth, running, height, backend, hwConnected]);
+
+  // Subscribe to real-SDR spectrum updates
+  const realSpectrumRef = useRef<Float32Array | null>(null);
+  useEffect(() => {
+    const unsub = onRealSpectrum((data) => {
+      if (realSpectrumRef.current === null || realSpectrumRef.current.length !== data.length) {
+        realSpectrumRef.current = new Float32Array(data.length);
+      }
+      realSpectrumRef.current.set(data);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const draw = () => {
@@ -99,7 +116,18 @@ export function WaterfallDisplay({ height = 280, onSeek, onHover }: Props) {
         ctx.restore();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-        if (s.running) {
+        const useReal = s.backend === "real" && s.hwConnected && realSpectrumRef.current !== null;
+        if (useReal) {
+          // Mirror the real spectrum into our SIZE-wide buffer (see spectrum
+          // analyzer for the same mapping)
+          const real = realSpectrumRef.current!;
+          const n = real.length;
+          for (let i = 0; i < SIZE; i++) {
+            const pos = i < SIZE / 2 ? SIZE / 2 - 1 - i : i - SIZE / 2;
+            const binIdx = Math.min(n - 1, pos);
+            lastSpectrumRef.current[i] = real[binIdx];
+          }
+        } else if (s.running) {
           const effGain = s.autoGain ? 35 : s.gainDb;
           lastSpectrumRef.current = generateSpectrum(
             s.frequency,
