@@ -94,8 +94,11 @@ class FmDemod implements Demodulator {
       while (diff > Math.PI) diff -= 2 * Math.PI;
       while (diff < -Math.PI) diff += 2 * Math.PI;
       this.prevPhase = phase;
-      // Normalize by expected deviation
-      raw[i] = (diff / Math.PI) * (this.deviation / 75000);
+      // Convert phase diff back to instantaneous frequency, then normalize
+      // by the expected deviation so full-deviation produces ~1.0 amplitude.
+      //   f_inst = diff * sampleRate / (2π)
+      //   output = f_inst / deviation
+      raw[i] = (diff * sampleRate) / (2 * Math.PI * this.deviation);
     }
 
     // Low-pass the audio, then decimate to 48 kHz

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { getAudioEngine } from "@/lib/sdr-audio";
@@ -37,14 +37,36 @@ export function TransportBar({ level }: Props) {
     settingsRef.current = { audioEnabled, volume, backend, hwConnected };
   }, [audioEnabled, volume, backend, hwConnected]);
 
+  // Track real-audio frame stats for the activity indicator
+  const [audioFrames, setAudioFrames] = useState(0);
+  const [lastAudioLevel, setLastAudioLevel] = useState(0);
+
   // Subscribe to real-audio frames and push them to the audio engine
   useEffect(() => {
+    let lastUpdate = 0;
+    let lastLevelUpdate = 0;
     const unsub = onRealAudio((frame) => {
       const s = settingsRef.current;
       if (s.backend !== "real" || !s.hwConnected || !s.audioEnabled) return;
       const engine = getAudioEngine();
       engine.setRealMode(true);
       engine.pushRealAudioFrame(frame.samples, frame.sampleRate, s.volume);
+      // Compute peak amplitude for the activity indicator
+      let peak = 0;
+      for (let i = 0; i < frame.samples.length; i++) {
+        const v = Math.abs(frame.samples[i]);
+        if (v > peak) peak = v;
+      }
+      // Throttle state updates to ~10 Hz so we don't re-render every frame
+      const now = performance.now();
+      if (now - lastUpdate > 100) {
+        setAudioFrames((c) => c + 1);
+        lastUpdate = now;
+      }
+      if (now - lastLevelUpdate > 50) {
+        setLastAudioLevel(peak);
+        lastLevelUpdate = now;
+      }
     });
     return unsub;
   }, []);
@@ -185,6 +207,41 @@ export function TransportBar({ level }: Props) {
         />
         {isMutedBySquelch ? "SQL CLOSED" : "SQL OPEN"}
       </div>
+
+      {/* Real-audio activity meter — only shown when in real mode */}
+      {backend === "real" && hwConnected && audioEnabled && (
+        <div className="flex items-center gap-2 text-[10px] sdr-mono text-[oklch(0.55_0.04_250)]">
+          <span className="text-[9px] uppercase tracking-wider">Audio</span>
+          <div className="flex items-center gap-0.5">
+            {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+              const threshold = (i + 1) * 0.12;
+              const active = lastAudioLevel >= threshold;
+              const color =
+                i < 4
+                  ? "bg-[oklch(0.80_0.18_155)]"
+                  : i < 6
+                    ? "bg-[oklch(0.82_0.16_70)]"
+                    : "bg-[oklch(0.5_0.2_25)]";
+              return (
+                <span
+                  key={i}
+                  className={cn(
+                    "h-2 w-1 rounded-sm transition-opacity",
+                    color,
+                    active ? "opacity-100" : "opacity-20",
+                  )}
+                />
+              );
+            })}
+          </div>
+          <span className="text-[oklch(0.65_0.04_250)]">
+            {(lastAudioLevel * 100).toFixed(0)}%
+          </span>
+          <span className="text-[oklch(0.4_0.04_250)]">
+            · {(audioFrames * 10)} f/s
+          </span>
+        </div>
+      )}
     </div>
   );
 }
