@@ -73,13 +73,16 @@ function connectRtl() {
   sock.on("data", (chunk) => {
     if (!handshakeDone) {
       // rtl_tcp sends a 12-byte handshake on connect: "RTL0" + 4-byte
-      // tuner_id (LE) + 4-byte tuner_gain_count (LE)
+      // tuner_id (BE, htonl) + 4-byte tuner_gain_count (BE)
       if (chunk.length < 12) {
         return; // wait for more
       }
       const magic = chunk.slice(0, 4).toString("ascii");
       if (magic.startsWith("RTL0")) {
-        const tunerId = chunk.readUInt32LE(4);
+        // rtl_tcp uses BIG-ENDIAN for the tuner_id and gain_count fields
+        // (see rtl_tcp.c — it wraps them with htonl). Reading as LE produces
+        // huge numbers like 83886080 (0x05000000) which is actually 5 (R820T).
+        const tunerId = chunk.readUInt32BE(4);
         deviceName = inferTunerName(tunerId);
         console.log(`[bridge] rtl_tcp handshake OK (tuner: ${deviceName})`);
       } else {
