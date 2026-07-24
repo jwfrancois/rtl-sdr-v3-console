@@ -26,7 +26,8 @@ export class RealSdrSource implements SdrSource {
   readonly kind = "real" as const;
 
   private ws: WebSocket | null = null;
-  private url: string;
+  /** Public so the manager can detect URL changes. */
+  readonly url: string;
   private fftSize: number;
   private spectrumBuf: Float32Array;
   private demod: ReturnType<typeof createDemodulator>;

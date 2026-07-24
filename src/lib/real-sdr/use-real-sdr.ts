@@ -6,30 +6,65 @@ import { RealSdrSource } from "./real-sdr-source";
 import { AudioFrame, SdrStatus } from "./types";
 
 /**
+ * Global callback sets for spectrum + audio.
+ *
+ * We use module-level sets (not tied to the source instance) so that
+ * components can subscribe at mount time — even before the source exists
+ * — and their callbacks will automatically receive data once the source
+ * is created later (when the user switches to "real" mode).
+ *
+ * This avoids the race condition where a component mounts, calls
+ * `onRealSpectrum(cb)`, but the source doesn't exist yet so the
+ * subscription silently becomes a no-op.
+ */
+const spectrumCbs = new Set<(data: Float32Array, fc: number, sr: number) => void>();
+const audioCbs = new Set<(f: AudioFrame) => void>();
+
+/**
  * Singleton holder for the RealSdrSource. The source is created on first
- * connect and torn down when the user disconnects. It is NOT recreated on
- * every render — that would lose the WebSocket connection.
+ * connect and torn down when the user disconnects.
  */
 let source: RealSdrSource | null = null;
+let sourceWired = false; // have we already attached the dispatch listeners?
 let statusSubscribed = false;
 
 function getSource(bridgeUrl: string): RealSdrSource {
-  if (!source || source["url" as keyof RealSdrSource] !== (bridgeUrl as never)) {
+  if (!source || source.url !== bridgeUrl) {
     if (source) source.dispose();
     source = new RealSdrSource(bridgeUrl, 1024);
+    sourceWired = false;
+  }
+  // Wire the source's spectrum/audio dispatchers to our global sets.
+  // This is idempotent — we only do it once per source instance.
+  if (!sourceWired) {
+    source.onSpectrum((data, fc, sr) => {
+      for (const cb of spectrumCbs) {
+        try {
+          cb(data, fc, sr);
+        } catch (e) {
+          console.error("[sdr] spectrum callback error", e);
+        }
+      }
+    });
+    source.onAudio((frame) => {
+      for (const cb of audioCbs) {
+        try {
+          cb(frame);
+        } catch (e) {
+          console.error("[sdr] audio callback error", e);
+        }
+      }
+    });
+    sourceWired = true;
   }
   return source;
 }
 
 /**
  * React hook that owns the real-SDR source lifecycle. When `backend === "real"`
- * we connect to the bridge, subscribe to status/spectrum/audio, and forward
- * settings (frequency, gain, sample rate, demod) to the bridge as the user
- * changes them. When the backend flips back to "simulated", we tear down.
- *
- * The spectrum and audio are exposed via callbacks registered by individual
- * components (so each canvas can subscribe independently). This hook only
- * manages connection + control forwarding.
+ * we connect to the bridge, subscribe to status, and forward settings
+ * (frequency, gain, sample rate, demod) to the bridge as the user changes them.
+ * When the backend flips back to "simulated", we tear down.
  */
 export function useRealSdrManager() {
   const backend = useSdrStore((s) => s.backend);
@@ -71,6 +106,7 @@ export function useRealSdrManager() {
       if (source) {
         source.dispose();
         source = null;
+        sourceWired = false;
         statusSubscribed = false;
         setHwStatus(null);
       }
@@ -81,7 +117,7 @@ export function useRealSdrManager() {
     setBridgeConnecting(true);
     setBridgeError(null);
 
-    // Subscribe to status updates
+    // Subscribe to status updates (once per source instance)
     if (!statusSubscribed) {
       src.onStatus((s: SdrStatus) => {
         setHwStatus(s);
@@ -113,12 +149,6 @@ export function useRealSdrManager() {
         setBridgeConnecting(false);
         setBridgeError(err.message);
       });
-
-    return () => {
-      // Don't dispose on every re-render — only when the user explicitly
-      // switches backends. The `backend !== "real"` branch above handles
-      // that case.
-    };
   }, [backend, bridgeUrl, setBridgeConnecting, setBridgeError, setHwStatus]);
 
   // Forward control changes to the bridge whenever settings change
@@ -165,21 +195,27 @@ export function useRealSdrManager() {
   });
 }
 
-/** Register a spectrum callback against the live real-SDR source (if connected). */
+/**
+ * Subscribe to real-SDR spectrum updates. Works even if the source
+ * doesn't exist yet — the callback will automatically receive data
+ * once the source is created (when the user switches to "real" mode).
+ */
 export function onRealSpectrum(
   cb: (data: Float32Array, fc: number, sr: number) => void,
 ): () => void {
-  if (!source) return () => {};
-  return source.onSpectrum(cb);
+  spectrumCbs.add(cb);
+  return () => {
+    spectrumCbs.delete(cb);
+  };
 }
 
-/** Register an audio callback against the live real-SDR source (if connected). */
+/**
+ * Subscribe to real-SDR audio frames. Same lifecycle guarantee as
+ * `onRealSpectrum`.
+ */
 export function onRealAudio(cb: (f: AudioFrame) => void): () => void {
-  if (!source) return () => {};
-  return source.onAudio(cb);
-}
-
-/** Returns true iff we are connected to a real SDR via the bridge. */
-export function isRealSdrConnected(): boolean {
-  return !!source && useSdrStore.getState().hwStatus?.connected === true;
+  audioCbs.add(cb);
+  return () => {
+    audioCbs.delete(cb);
+  };
 }
