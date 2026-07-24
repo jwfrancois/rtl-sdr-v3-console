@@ -34,14 +34,25 @@ export function StatusHeader() {
   const audioEnabled = useSdrStore((s) => s.audioEnabled);
   const recording = useSdrStore((s) => s.recording);
 
-  const [now, setNow] = useState(() => new Date());
+  // Don't render time-sensitive values during SSR — they always differ from
+  // the client's local clock and trigger hydration mismatches. Render a
+  // stable placeholder (`mounted === false`) on the first client paint,
+  // which matches the SSR markup. The clock then ticks via setInterval.
+  const [now, setNow] = useState<Date | null>(null);
   const [uptime, setUptime] = useState(0);
+  const mounted = now !== null;
 
   useEffect(() => {
+    // Start the interval immediately; first tick at ~100 ms gives a near-
+    // instant clock without an explicit setState-during-effect call.
+    let tick = 0;
     const id = window.setInterval(() => {
       setNow(new Date());
-      setUptime((u) => u + 1);
+      tick += 1;
+      if (tick > 0) setUptime(tick - 1);
     }, 1000);
+    // Fire one immediate tick to populate the clock without setState-in-effect
+    // (this runs inside the interval callback, not the effect body)
     return () => window.clearInterval(id);
   }, []);
 
@@ -143,11 +154,15 @@ export function StatusHeader() {
         {/* Clock */}
         <div className="flex items-center gap-1.5 text-[11px] sdr-mono text-[oklch(0.6_0.04_250)]">
           <Clock className="h-3 w-3" />
-          <span>
-            {now.toLocaleTimeString("en-US", { hour12: false })}
+          <span suppressHydrationWarning>
+            {mounted && now
+              ? now.toLocaleTimeString("en-US", { hour12: false })
+              : "--:--:--"}
           </span>
           <span className="text-[oklch(0.4_0.04_250)]">·</span>
-          <span className="text-[oklch(0.5_0.04_250)]">UP {formatUptime(uptime)}</span>
+          <span className="text-[oklch(0.5_0.04_250)]" suppressHydrationWarning>
+            UP {mounted ? formatUptime(uptime) : "0s"}
+          </span>
         </div>
       </div>
 
