@@ -93,6 +93,11 @@ export class SdrAudioEngine {
   static readonly EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
   setRealMode(enabled: boolean) {
+    // Guard: don't do anything if we're already in this mode. This is
+    // critical because pushRealAudioFrame() calls setRealMode(true) on
+    // every audio frame (~100 Hz), and the setup below is expensive
+    // enough to cause choppiness if it runs every frame.
+    if (this.realMode === enabled) return;
     this.realMode = enabled;
     if (enabled) {
       // Mute the synth voices
@@ -207,8 +212,8 @@ export class SdrAudioEngine {
     }
     this.pendingSources.clear();
     // Reset the schedule so the next frame plays with a small look-ahead
-    // (50ms — same as the buffer look-ahead, to absorb jitter).
-    this.nextStartTime = this.ctx.currentTime + 0.05;
+    // (20ms — same as the buffer look-ahead, to absorb jitter).
+    this.nextStartTime = this.ctx.currentTime + 0.02;
   }
 
   /** Push a real demodulated audio frame into the output queue. */
@@ -224,10 +229,11 @@ export class SdrAudioEngine {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(this.realGain);
-    // Schedule back-to-back with previously queued frames. The 50ms
-    // look-ahead (0.05s) absorbs minor network jitter and prevents
-    // underruns that cause choppy audio. Was 5ms which was too tight.
-    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.05);
+    // Schedule back-to-back with previously queued frames. 20ms look-ahead
+    // is the sweet spot: enough to absorb minor network jitter without
+    // causing perceptible lag. 5ms was too tight (underruns), 50ms was
+    // too laggy (audible delay vs spectrum).
+    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.02);
     src.start(start);
     this.nextStartTime = start + samples.length / sampleRate;
     // Track for cancellation

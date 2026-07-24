@@ -37,38 +37,59 @@ export function TransportBar({ level }: Props) {
     settingsRef.current = { audioEnabled, volume, backend, hwConnected };
   }, [audioEnabled, volume, backend, hwConnected]);
 
-  // Track real-audio frame stats for the activity indicator
-  const [audioFrames, setAudioFrames] = useState(0);
-  const [lastAudioLevel, setLastAudioLevel] = useState(0);
+  // Track real-audio frame stats via REFS (not state) so audio frame
+  // processing NEVER triggers React re-renders. The activity meter is
+  // updated by a separate lightweight rAF loop that reads the refs.
+  // This is critical: calling setState on every audio frame (even throttled
+  // to 10-20 Hz) causes re-renders that disrupt the audio engine's
+  // scheduling and produce choppy audio.
+  const audioLevelRef = useRef(0);
+  const audioFrameCountRef = useRef(0);
+  const [audioLevelDisplay, setAudioLevelDisplay] = useState(0);
+  const [audioFrameDisplay, setAudioFrameDisplay] = useState(0);
 
-  // Subscribe to real-audio frames and push them to the audio engine
+  // Subscribe to real-audio frames and push them to the audio engine.
+  // This callback must be FAST — no React state updates here.
   useEffect(() => {
-    let lastUpdate = 0;
-    let lastLevelUpdate = 0;
     const unsub = onRealAudio((frame) => {
       const s = settingsRef.current;
       if (s.backend !== "real" || !s.hwConnected || !s.audioEnabled) return;
       const engine = getAudioEngine();
       engine.setRealMode(true);
       engine.pushRealAudioFrame(frame.samples, frame.sampleRate, s.volume);
-      // Compute peak amplitude for the activity indicator
-      let peak = 0;
-      for (let i = 0; i < frame.samples.length; i++) {
-        const v = Math.abs(frame.samples[i]);
-        if (v > peak) peak = v;
-      }
-      // Throttle state updates to ~10 Hz so we don't re-render every frame
-      const now = performance.now();
-      if (now - lastUpdate > 100) {
-        setAudioFrames((c) => c + 1);
-        lastUpdate = now;
-      }
-      if (now - lastLevelUpdate > 50) {
-        setLastAudioLevel(peak);
-        lastLevelUpdate = now;
+      // Update refs (cheap — no re-render). Sample only every 10th value
+      // to avoid the peak computation cost on every frame.
+      audioFrameCountRef.current++;
+      if (audioFrameCountRef.current % 4 === 0) {
+        let peak = 0;
+        const samples = frame.samples;
+        // Stride-4 sampling: still accurate enough for a meter
+        for (let i = 0; i < samples.length; i += 4) {
+          const v = Math.abs(samples[i]);
+          if (v > peak) peak = v;
+        }
+        audioLevelRef.current = peak;
       }
     });
     return unsub;
+  }, []);
+
+  // Separate rAF loop updates the visible meter at ~15 Hz. This decouples
+  // the meter display from audio processing.
+  useEffect(() => {
+    let raf = 0;
+    let lastUpdate = 0;
+    const tick = () => {
+      const now = performance.now();
+      if (now - lastUpdate > 66) {  // ~15 Hz
+        setAudioLevelDisplay(audioLevelRef.current);
+        setAudioFrameDisplay(audioFrameCountRef.current);
+        lastUpdate = now;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   // Drive the simulated audio engine when in simulated mode (or real but
@@ -223,14 +244,16 @@ export function TransportBar({ level }: Props) {
         {isMutedBySquelch ? "SQL CLOSED" : "SQL OPEN"}
       </div>
 
-      {/* Real-audio activity meter — only shown when in real mode */}
+      {/* Real-audio activity meter — only shown when in real mode.
+          Uses the display state updated by the separate rAF loop, so
+          audio frame processing never triggers re-renders. */}
       {backend === "real" && hwConnected && audioEnabled && (
         <div className="flex items-center gap-2 text-[10px] sdr-mono text-[oklch(0.55_0.04_250)]">
           <span className="text-[9px] uppercase tracking-wider">Audio</span>
           <div className="flex items-center gap-0.5">
             {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
               const threshold = (i + 1) * 0.12;
-              const active = lastAudioLevel >= threshold;
+              const active = audioLevelDisplay >= threshold;
               const color =
                 i < 4
                   ? "bg-[oklch(0.80_0.18_155)]"
@@ -250,10 +273,10 @@ export function TransportBar({ level }: Props) {
             })}
           </div>
           <span className="text-[oklch(0.65_0.04_250)]">
-            {(lastAudioLevel * 100).toFixed(0)}%
+            {(audioLevelDisplay * 100).toFixed(0)}%
           </span>
           <span className="text-[oklch(0.4_0.04_250)]">
-            · {(audioFrames * 10)} f/s
+            · {audioFrameDisplay} frames
           </span>
         </div>
       )}

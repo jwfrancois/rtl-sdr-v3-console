@@ -60,8 +60,13 @@ export function SdrcomMeter() {
     return unsub;
   }, []);
 
-  // Compute meter readings from the spectrum
+  // Compute meter readings from the spectrum. Throttle setState to ~10 Hz
+  // to avoid re-rendering this component (and its children) every frame.
+  // The meter bar canvas is drawn by its own rAF loop and reads from refs,
+  // so it stays smooth at 60 Hz.
+  const readingRef = useRef<MeterReading | null>(null);
   useEffect(() => {
+    let lastSetState = 0;
     const compute = () => {
       const spec = spectrumRef.current;
       let signalDb = -120;
@@ -138,10 +143,17 @@ export function SdrcomMeter() {
         }
       }
 
-      setReading({
+      // Update the ref every frame (cheap), but only setState at ~10 Hz
+      // to avoid re-rendering the component every frame.
+      readingRef.current = {
         signalDb, noiseFloorDb, snrDb, dbm, sUnits, peakDb,
         bandwidth,
-      });
+      };
+      const now = performance.now();
+      if (now - lastSetState > 100) {
+        setReading(readingRef.current);
+        lastSetState = now;
+      }
       rafRef.current = requestAnimationFrame(compute);
     };
     rafRef.current = requestAnimationFrame(compute);
