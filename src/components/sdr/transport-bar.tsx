@@ -56,7 +56,7 @@ export function TransportBar({ level }: Props) {
       if (s.backend !== "real" || !s.hwConnected || !s.audioEnabled) return;
       const engine = getAudioEngine();
       engine.setRealMode(true);
-      engine.pushRealAudioFrame(frame.samples, frame.sampleRate, s.volume);
+      engine.pushRealAudioFrame(frame.samples, frame.sampleRate, s.volume, frame.samplesRight);
       // Update refs (cheap — no re-render). Sample only every 10th value
       // to avoid the peak computation cost on every frame.
       audioFrameCountRef.current++;

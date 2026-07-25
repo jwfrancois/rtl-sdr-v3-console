@@ -485,7 +485,9 @@ export class RealSdrSource implements SdrSource {
     const result = this.demod.process(floatIQ, block.sampleRate);
     const frame: AudioFrame = {
       samples: result.audio,
+      samplesRight: result.audioRight,
       sampleRate: result.audioRate,
+      stereo: result.stereo,
     };
     for (const cb of this.audioCbs) cb(frame);
   }

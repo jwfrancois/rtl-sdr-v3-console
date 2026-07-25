@@ -216,23 +216,29 @@ export class SdrAudioEngine {
     this.nextStartTime = this.ctx.currentTime + 0.02;
   }
 
-  /** Push a real demodulated audio frame into the output queue. */
-  pushRealAudioFrame(samples: Float32Array, sampleRate: number, volume: number) {
+  /** Push a real demodulated audio frame into the output queue.
+   *  Supports both mono and stereo frames. */
+  pushRealAudioFrame(samples: Float32Array, sampleRate: number, volume: number, samplesRight?: Float32Array) {
     if (!this.realMode || !this.ctx || !this.masterGain || !this.realGain) return;
     const ctx = this.ctx;
     // Update volume via the realGain (don't touch masterGain — that's our
     // global gate)
     this.realGain.gain.setTargetAtTime(volume, ctx.currentTime, 0.03);
 
-    const buf = ctx.createBuffer(1, samples.length, sampleRate);
+    // Create stereo or mono buffer depending on whether we have R channel
+    const isStereo = samplesRight && samplesRight.length === samples.length;
+    const numChannels = isStereo ? 2 : 1;
+    const buf = ctx.createBuffer(numChannels, samples.length, sampleRate);
     buf.copyToChannel(samples, 0);
+    if (isStereo) {
+      buf.copyToChannel(samplesRight!, 1);
+    }
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(this.realGain);
     // Schedule back-to-back with previously queued frames. 20ms look-ahead
     // is the sweet spot: enough to absorb minor network jitter without
-    // causing perceptible lag. 5ms was too tight (underruns), 50ms was
-    // too laggy (audible delay vs spectrum).
+    // causing perceptible lag.
     const start = Math.max(this.nextStartTime, ctx.currentTime + 0.02);
     src.start(start);
     this.nextStartTime = start + samples.length / sampleRate;

@@ -59,10 +59,14 @@ export interface SdrStatus {
 
 /** A demodulated audio frame, ready to be pushed to the audio output. */
 export interface AudioFrame {
-  /** Mono PCM samples in [-1, 1]. */
+  /** Left channel PCM samples in [-1, 1] (also the mono channel when stereo=false). */
   samples: Float32Array;
-  /** Sample rate of the audio (after decimation), typically 24/48 kHz. */
+  /** Right channel PCM samples in [-1, 1] (only present when stereo). */
+  samplesRight?: Float32Array;
+  /** Sample rate of the audio (after decimation), typically 48 kHz. */
   sampleRate: number;
+  /** Whether this frame contains stereo data. */
+  stereo: boolean;
 }
 
 /** Common interface implemented by both the simulated and real SDR sources. */
