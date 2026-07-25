@@ -181,33 +181,19 @@ class FmDemod implements Demodulator {
     const mpx = this.mpxBuf;
     const lpr = this.lprBuf;
 
-    // --- Step 1: Pre-decimate (anti-alias filter + downsample) ---
-    // Low-pass at 150 kHz (covers full FM multiplex: 53 kHz SCA + RDS)
-    // before decimating to ~384 kHz.
+    // --- Step 1: Pre-decimate (anti-alias filter both I and Q) ---
+    // Low-pass at 150 kHz (covers full FM multiplex) before decimating.
+    // Must filter BOTH I and Q — filtering only I corrupts the phase.
     for (let i = 0, j = 0; i < n; i++) {
       const fi = this.preDecimLp.process(iq[i * 2]);
-      const fq = iq[i * 2 + 1]; // Q doesn't need anti-aliasing separately
+      const fq = this.preDecimLp.process(iq[i * 2 + 1]);
       if (i % this.decimation === 0 && j < demodLen) {
-        // --- FM demodulate at decimated rate (fast atan2) ---
-        const absQ = fq < 0 ? -fq : fq;
-        const absI = fi < 0 ? -fi : fi;
-        let angle;
-        if (absI > absQ) {
-          const r = fq / (absI + 1e-30);
-          angle = r * (1.0 - 0.27 * r * r);
-        } else {
-          const r = fi / (absQ + 1e-30);
-          angle = (Math.PI / 2) - r * (1.0 - 0.27 * r * r);
-        }
-        if (fi < 0) {
-          angle = fq < 0 ? angle - Math.PI : Math.PI - angle;
-        } else if (fq < 0) {
-          angle = -angle;
-        }
-        let diff = angle - this.prevPhase;
+        // FM demodulate using Math.atan2 (correct, no approximation)
+        const phase = Math.atan2(fq, fi);
+        let diff = phase - this.prevPhase;
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
-        this.prevPhase = angle;
+        this.prevPhase = phase;
         mpx[j] = (diff * demodRate) / (2 * Math.PI * this.deviation);
         j++;
       }
