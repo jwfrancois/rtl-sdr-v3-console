@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { FILTER_BANDWIDTHS, type DemodMode } from "@/lib/sdr-engine";
+import { _getSource } from "@/lib/real-sdr/use-real-sdr";
 import { cn } from "@/lib/utils";
 import { Waves, Radio, Headphones, Wifi, Mic, Binary, Zap } from "lucide-react";
 
@@ -26,6 +28,15 @@ export function DemodulatorControls() {
   const setDemod = useSdrStore((s) => s.setDemod);
   const bandwidth = useSdrStore((s) => s.bandwidth);
   const setBandwidth = useSdrStore((s) => s.setBandwidth);
+  const [stereo, setStereo] = useState(false);
+
+  // When demod changes away from WFM, reset stereo
+  useEffect(() => {
+    if (demod !== "WFM") {
+      const id = window.setTimeout(() => setStereo(false), 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [demod]);
 
   const bandwidths = FILTER_BANDWIDTHS[demod];
 
@@ -102,6 +113,41 @@ export function DemodulatorControls() {
           })}
         </div>
       </div>
+
+      {/* Stereo toggle — only for WFM */}
+      {demod === "WFM" && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] uppercase tracking-widest text-[oklch(0.55_0.04_250)]">
+              Stereo
+            </span>
+            <span className="text-[10px] sdr-mono text-[oklch(0.82_0.16_70)]">
+              {stereo ? "STEREO" : "MONO"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !stereo;
+              setStereo(next);
+              const src = _getSource(useSdrStore.getState().bridgeUrl);
+              src?.setStereo(next);
+            }}
+            className={cn(
+              "w-full flex items-center justify-center gap-2 py-2 rounded-md border transition-all text-xs sdr-mono",
+              stereo
+                ? "bg-[oklch(0.82_0.16_70/0.18)] border-[oklch(0.82_0.16_70/0.6)] text-[oklch(0.95_0.04_70)] shadow-[0_0_12px_oklch(0.82_0.16_70/0.3)]"
+                : "bg-[oklch(0.13_0.025_255/0.6)] border-[oklch(0.85_0.18_195/0.15)] text-[oklch(0.65_0.04_250)] hover:bg-[oklch(0.18_0.03_255/0.8)]",
+            )}
+          >
+            <Headphones className="h-3.5 w-3.5" />
+            {stereo ? "STEREO ON" : "STEREO OFF"}
+          </button>
+          <p className="mt-1.5 text-[9px] text-[oklch(0.5_0.04_250)] leading-relaxed">
+            Stereo adds pilot PLL + L-R demod. Enable on strong signals for HiFi. Disable for weak signals (mono is cleaner).
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -145,6 +145,13 @@ export class RealSdrSource implements SdrSource {
     if (kind !== "WFM") this.rds.reset();
   }
 
+  /** Enable/disable stereo FM decoding (WFM mode only). */
+  setStereo(enabled: boolean) {
+    if (typeof (this.demod as any).setStereo === "function") {
+      (this.demod as any).setStereo(enabled);
+    }
+  }
+
   /** Subscribe to RDS state updates. */
   onRds(cb: (s: RdsState) => void): () => void {
     this.rdsCbs.add(cb);

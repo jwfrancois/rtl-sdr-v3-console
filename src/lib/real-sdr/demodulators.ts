@@ -88,6 +88,17 @@ class FmDemod implements Demodulator {
   private prevPhase = 0;
   private readonly deviation: number;
   private readonly isWide: boolean;
+  private stereoEnabled = false;
+
+  // Pre-decimation filters (run at SDR sample rate)
+  private audioLp: Biquad;   // 15 kHz low-pass for L+R
+  // Stereo-only filters (only allocated when stereo is enabled)
+  private pilotBp: Biquad | null = null;   // 19 kHz bandpass
+  private audioLpR: Biquad | null = null;  // 15 kHz low-pass for L-R
+
+  // Post-decimation de-emphasis (run at 48 kHz output rate)
+  private deemphL: Biquad;
+  private deemphR: Biquad | null = null;
 
   // Pilot PLL state
   private pllPhase = 0;
@@ -97,53 +108,59 @@ class FmDemod implements Demodulator {
   private pllLockCount = 0;
   private pllLocked = false;
 
-  // Filters — all run at the FULL SDR sample rate, BEFORE decimation.
-  // This is critical: de-emphasis configured at 2.4 MHz but called on
-  // decimated 48 kHz samples would cut everything (effective cutoff
-  // would be 42 Hz instead of 2122 Hz).
-  private pilotBp: Biquad;
-  private audioLpL: Biquad;
-  private audioLpR: Biquad;
-  private deemphL: Biquad;
-  private deemphR: Biquad;
-
-  // Pre-allocated buffers — avoid GC pressure from per-block allocation
+  // Pre-allocated buffers
   private mpxBuf: Float32Array = new Float32Array(0);
   private lprBuf: Float32Array = new Float32Array(0);
   private lmrBuf: Float32Array = new Float32Array(0);
   private outLBuf: Float32Array = new Float32Array(0);
   private outRBuf: Float32Array = new Float32Array(0);
 
+  private _sdrRate = 0;
+  private _outRate = 48000;
   private _initialized = false;
 
   constructor(bandwidth: number, deviation: number, _audioCutoff: number) {
     this.deviation = deviation;
     this.isWide = deviation >= 50000;
-    this.pilotBp = new Biquad();
-    this.audioLpL = new Biquad();
-    this.audioLpR = new Biquad();
+    this.audioLp = new Biquad();
     this.deemphL = new Biquad();
-    this.deemphR = new Biquad();
+  }
+
+  setStereo(enabled: boolean) {
+    this.stereoEnabled = enabled && this.isWide;
+    if (this.stereoEnabled && !this.pilotBp) {
+      this.pilotBp = new Biquad();
+      this.audioLpR = new Biquad();
+      this.deemphR = new Biquad();
+    }
+    if (this._sdrRate > 0) this._init(this._sdrRate);
   }
 
   process(iq: Float32Array, sampleRate: number): DemodResult {
-    if (!this._initialized) {
+    if (!this._initialized || this._sdrRate !== sampleRate) {
+      this._sdrRate = sampleRate;
       this._init(sampleRate);
       this._initialized = true;
     }
 
     const n = iq.length / 2;
+    const decimation = Math.max(1, Math.floor(sampleRate / this._outRate));
+    const outLen = Math.floor(n / decimation);
 
-    // Ensure buffers are sized correctly (pre-allocated, no per-block GC)
+    // Ensure buffers
     if (this.mpxBuf.length !== n) {
       this.mpxBuf = new Float32Array(n);
       this.lprBuf = new Float32Array(n);
-      this.lmrBuf = new Float32Array(n);
+      if (this.stereoEnabled) this.lmrBuf = new Float32Array(n);
+    }
+    if (this.outLBuf.length !== outLen) {
+      this.outLBuf = new Float32Array(outLen);
+      if (this.stereoEnabled) this.outRBuf = new Float32Array(outLen);
     }
     const mpx = this.mpxBuf;
     const lpr = this.lprBuf;
 
-    // --- Step 1: FM demodulate → multiplex signal ---
+    // --- Step 1: FM demodulate → multiplex ---
     for (let i = 0; i < n; i++) {
       const I = iq[i * 2];
       const Q = iq[i * 2 + 1];
@@ -155,117 +172,82 @@ class FmDemod implements Demodulator {
       mpx[i] = (diff * sampleRate) / (2 * Math.PI * this.deviation);
     }
 
-    // --- Step 2: Mono path: L+R = low-pass(mpx, 15 kHz) + de-emphasis ---
-    // ALL filtering at full SDR rate, BEFORE decimation.
+    // --- Step 2: Low-pass L+R at 15 kHz (SDR rate) ---
     for (let i = 0; i < n; i++) {
-      lpr[i] = this.deemphL.process(this.audioLpL.process(mpx[i]));
+      lpr[i] = this.audioLp.process(mpx[i]);
     }
 
-    // --- Step 3: Stereo path (only for WFM) ---
-    if (this.isWide) {
-      // Extract 19 kHz pilot + PLL + L-R demod — all in ONE pass to
-      // minimize allocations and loop overhead
+    // --- Step 3: Stereo path (only if enabled AND PLL locks) ---
+    if (this.stereoEnabled && this.pilotBp && this.audioLpR) {
       const lmr = this.lmrBuf;
+      // Pilot extract + PLL + L-R demod in one pass
       for (let i = 0; i < n; i++) {
         const p = this.pilotBp.process(mpx[i]);
-
-        // PLL phase detector
         const localSin = Math.sin(this.pllPhase);
         const error = p * localSin;
-
-        // Loop filter (proportional + integral)
         this.pllError = this.pllError * 0.999 + error * 0.001;
-        const freqAdjust = error * 0.0001 + this.pllError;
-
-        // Update VCO
-        this.pllFreq = this.pllFreqNominal + freqAdjust;
+        this.pllFreq = this.pllFreqNominal + error * 0.0001 + this.pllError;
         this.pllPhase += this.pllFreq;
-
-        // Lock detection
-        const localCos = Math.cos(this.pllPhase);
-        const corr = Math.abs(p * localCos);
-        if (corr > 0.005) {
-          this.pllLockCount = Math.min(this.pllLockCount + 1, 1000);
-        } else {
-          this.pllLockCount = Math.max(this.pllLockCount - 1, 0);
-        }
+        const corr = Math.abs(p * Math.cos(this.pllPhase));
+        if (corr > 0.005) this.pllLockCount = Math.min(this.pllLockCount + 1, 1000);
+        else this.pllLockCount = Math.max(this.pllLockCount - 1, 0);
         this.pllLocked = this.pllLockCount > 50;
-
-        // L-R: multiply mpx by 38 kHz (2× PLL phase)
         lmr[i] = mpx[i] * Math.cos(2 * this.pllPhase);
       }
-
-      // Low-pass + de-emphasis L-R at full SDR rate
+      // Low-pass L-R at 15 kHz
       for (let i = 0; i < n; i++) {
-        lmr[i] = this.deemphR.process(this.audioLpR.process(lmr[i]));
-      }
-
-      // Decimate to 48 kHz
-      const decimation = Math.max(1, Math.floor(sampleRate / 48000));
-      const outLen = Math.floor(n / decimation);
-
-      if (this.outLBuf.length !== outLen) {
-        this.outLBuf = new Float32Array(outLen);
-        this.outRBuf = new Float32Array(outLen);
+        lmr[i] = this.audioLpR.process(lmr[i]);
       }
 
       if (this.pllLocked) {
-        // Stereo: L = (L+R + L-R)/2, R = (L+R - L-R)/2
+        // Stereo: decimate, then de-emphasis at output rate
         for (let i = 0; i < outLen; i++) {
           const idx = i * decimation;
-          this.outLBuf[i] = (lpr[idx] + lmr[idx]) * 0.5;
-          this.outRBuf[i] = (lpr[idx] - lmr[idx]) * 0.5;
+          const l = (lpr[idx] + lmr[idx]) * 0.5;
+          const r = (lpr[idx] - lmr[idx]) * 0.5;
+          this.outLBuf[i] = this.deemphL.process(l);
+          this.outRBuf[i] = this.deemphR!.process(r);
         }
-        return {
-          audio: this.outLBuf,
-          audioRight: this.outRBuf,
-          audioRate: Math.floor(sampleRate / decimation),
-          stereo: true,
-        };
+        return { audio: this.outLBuf, audioRight: this.outRBuf, audioRate: this._outRate, stereo: true };
       }
-      // PLL not locked — fall through to mono
     }
 
-    // --- Mono output: decimate the already-filtered L+R ---
-    const decimation = Math.max(1, Math.floor(sampleRate / 48000));
-    const outLen = Math.floor(n / decimation);
-    if (this.outLBuf.length !== outLen) {
-      this.outLBuf = new Float32Array(outLen);
-    }
+    // --- Mono: decimate L+R, then de-emphasis at output rate ---
     for (let i = 0; i < outLen; i++) {
-      this.outLBuf[i] = lpr[i * decimation];
+      this.outLBuf[i] = this.deemphL.process(lpr[i * decimation]);
     }
-    return { audio: this.outLBuf, audioRate: Math.floor(sampleRate / decimation), stereo: false };
+    return { audio: this.outLBuf, audioRate: this._outRate, stereo: false };
   }
 
   private _init(sampleRate: number) {
-    // Pilot extraction: high-Q lowpass at 19 kHz (resonance acts as bandpass)
-    this.pilotBp.setLowpass(sampleRate, 19000, 30);
-    // Audio low-pass at 15 kHz (also removes 19 kHz pilot from audio)
-    this.audioLpL.setLowpass(sampleRate, 15000, 0.707);
-    this.audioLpR.setLowpass(sampleRate, 15000, 0.707);
-    // De-emphasis: 75 µs (US) → 2122 Hz. MUST run at SDR sample rate.
-    this.deemphL.setLowpass(sampleRate, 2122, 0.707);
-    this.deemphR.setLowpass(sampleRate, 2122, 0.707);
-    // PLL: 19 kHz in radians per sample
-    this.pllFreqNominal = (2 * Math.PI * 19000) / sampleRate;
-    this.pllFreq = this.pllFreqNominal;
-    this.pllPhase = 0;
-    this.pllLockCount = 0;
-    this.pllLocked = false;
+    // Pre-decimation: 15 kHz low-pass at SDR rate
+    this.audioLp.setLowpass(sampleRate, 15000, 0.707);
+    // Post-decimation: de-emphasis at 48 kHz output rate
+    this._outRate = Math.floor(sampleRate / Math.max(1, Math.floor(sampleRate / 48000)));
+    this.deemphL.setLowpass(this._outRate, 2122, 0.707);
+
+    if (this.stereoEnabled) {
+      this.pilotBp!.setLowpass(sampleRate, 19000, 30);
+      this.audioLpR!.setLowpass(sampleRate, 15000, 0.707);
+      this.deemphR!.setLowpass(this._outRate, 2122, 0.707);
+      this.pllFreqNominal = (2 * Math.PI * 19000) / sampleRate;
+      this.pllFreq = this.pllFreqNominal;
+      this.pllPhase = 0;
+      this.pllLockCount = 0;
+      this.pllLocked = false;
+    }
   }
 
   reset(): void {
     this.prevPhase = 0;
     this.pllPhase = 0;
-    this.pllFreq = 0;
     this.pllLockCount = 0;
     this.pllLocked = false;
-    this.audioLpL.reset();
-    this.audioLpR.reset();
+    this.audioLp.reset();
     this.deemphL.reset();
-    this.deemphR.reset();
-    this.pilotBp.reset();
+    if (this.pilotBp) this.pilotBp.reset();
+    if (this.audioLpR) this.audioLpR.reset();
+    if (this.deemphR) this.deemphR.reset();
     this._initialized = false;
   }
 }
