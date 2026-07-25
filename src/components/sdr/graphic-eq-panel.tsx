@@ -69,8 +69,21 @@ export function GraphicEqPanel() {
   const backend = useSdrStore((s) => s.backend);
   const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
 
-  const [gains, setGains] = useState<number[]>(() => loadEq().gains);
-  const [bypass, setBypass] = useState<boolean>(() => loadEq().bypass);
+  // Initialize with defaults (bypass=true, flat gains) to match SSR.
+  // Hydrate from localStorage in a mount effect to avoid hydration mismatch.
+  const [gains, setGains] = useState<number[]>([...PRESETS.Flat]);
+  const [bypass, setBypass] = useState<boolean>(true);
+
+  // Hydrate from localStorage AFTER mount — same pattern as the main store.
+  useEffect(() => {
+    const saved = loadEq();
+    const id = window.setTimeout(() => {
+      setGains(saved.gains);
+      setBypass(saved.bypass);
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
   const [activePreset, setActivePreset] = useState<string>("Flat");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
