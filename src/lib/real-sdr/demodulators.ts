@@ -91,10 +91,14 @@ class FmDemod implements Demodulator {
   private stereoEnabled = false;
 
   // Pre-decimation filters (run at SDR sample rate)
-  private audioLp: Biquad;   // 15 kHz low-pass for L+R
+  // Two cascaded biquads for sharper cutoff (single biquad at 2.4 MHz
+  // has too gradual a roll-off, letting 19 kHz pilot leak into audio)
+  private audioLp1: Biquad;  // 15 kHz low-pass stage 1
+  private audioLp2: Biquad;  // 15 kHz low-pass stage 2
   // Stereo-only filters (only allocated when stereo is enabled)
   private pilotBp: Biquad | null = null;   // 19 kHz bandpass
-  private audioLpR: Biquad | null = null;  // 15 kHz low-pass for L-R
+  private audioLpR1: Biquad | null = null;  // 15 kHz low-pass for L-R stage 1
+  private audioLpR2: Biquad | null = null;  // 15 kHz low-pass for L-R stage 2
 
   // Post-decimation de-emphasis (run at 48 kHz output rate)
   private deemphL: Biquad;
@@ -122,7 +126,8 @@ class FmDemod implements Demodulator {
   constructor(bandwidth: number, deviation: number, _audioCutoff: number) {
     this.deviation = deviation;
     this.isWide = deviation >= 50000;
-    this.audioLp = new Biquad();
+    this.audioLp1 = new Biquad();
+    this.audioLp2 = new Biquad();
     this.deemphL = new Biquad();
   }
 
@@ -130,10 +135,11 @@ class FmDemod implements Demodulator {
     this.stereoEnabled = enabled && this.isWide;
     if (this.stereoEnabled && !this.pilotBp) {
       this.pilotBp = new Biquad();
-      this.audioLpR = new Biquad();
+      this.audioLpR1 = new Biquad();
+      this.audioLpR2 = new Biquad();
       this.deemphR = new Biquad();
     }
-    if (this._sdrRate > 0) this._init(this._sdrRate);
+    this.reset();
   }
 
   process(iq: Float32Array, sampleRate: number): DemodResult {
@@ -172,13 +178,15 @@ class FmDemod implements Demodulator {
       mpx[i] = (diff * sampleRate) / (2 * Math.PI * this.deviation);
     }
 
-    // --- Step 2: Low-pass L+R at 15 kHz (SDR rate) ---
+    // --- Step 2: Low-pass L+R at 15 kHz (cascaded biquads, SDR rate) ---
+    // Two stages give a much sharper cutoff than one — critical for
+    // rejecting the 19 kHz pilot and 23-53 kHz L-R subcarrier.
     for (let i = 0; i < n; i++) {
-      lpr[i] = this.audioLp.process(mpx[i]);
+      lpr[i] = this.audioLp2.process(this.audioLp1.process(mpx[i]));
     }
 
     // --- Step 3: Stereo path (only if enabled AND PLL locks) ---
-    if (this.stereoEnabled && this.pilotBp && this.audioLpR) {
+    if (this.stereoEnabled && this.pilotBp && this.audioLpR1 && this.audioLpR2) {
       const lmr = this.lmrBuf;
       // Pilot extract + PLL + L-R demod in one pass
       for (let i = 0; i < n; i++) {
@@ -194,9 +202,9 @@ class FmDemod implements Demodulator {
         this.pllLocked = this.pllLockCount > 50;
         lmr[i] = mpx[i] * Math.cos(2 * this.pllPhase);
       }
-      // Low-pass L-R at 15 kHz
+      // Low-pass L-R at 15 kHz (cascaded biquads)
       for (let i = 0; i < n; i++) {
-        lmr[i] = this.audioLpR.process(lmr[i]);
+        lmr[i] = this.audioLpR2.process(this.audioLpR1.process(lmr[i]));
       }
 
       if (this.pllLocked) {
@@ -220,15 +228,20 @@ class FmDemod implements Demodulator {
   }
 
   private _init(sampleRate: number) {
-    // Pre-decimation: 15 kHz low-pass at SDR rate
-    this.audioLp.setLowpass(sampleRate, 15000, 0.707);
+    // Pre-decimation: cascaded 15 kHz low-pass at SDR rate.
+    // Stage 1: Q=0.707 (Butterworth), Stage 2: Q=0.54 (Bessel-like).
+    // Together they give ~40 dB/ octave attenuation — enough to reject
+    // the 19 kHz pilot (4 kHz above cutoff = ~24 dB rejection per stage).
+    this.audioLp1.setLowpass(sampleRate, 15000, 0.707);
+    this.audioLp2.setLowpass(sampleRate, 15000, 0.54);
     // Post-decimation: de-emphasis at 48 kHz output rate
     this._outRate = Math.floor(sampleRate / Math.max(1, Math.floor(sampleRate / 48000)));
     this.deemphL.setLowpass(this._outRate, 2122, 0.707);
 
     if (this.stereoEnabled) {
       this.pilotBp!.setLowpass(sampleRate, 19000, 30);
-      this.audioLpR!.setLowpass(sampleRate, 15000, 0.707);
+      this.audioLpR1!.setLowpass(sampleRate, 15000, 0.707);
+      this.audioLpR2!.setLowpass(sampleRate, 15000, 0.54);
       this.deemphR!.setLowpass(this._outRate, 2122, 0.707);
       this.pllFreqNominal = (2 * Math.PI * 19000) / sampleRate;
       this.pllFreq = this.pllFreqNominal;
@@ -243,10 +256,12 @@ class FmDemod implements Demodulator {
     this.pllPhase = 0;
     this.pllLockCount = 0;
     this.pllLocked = false;
-    this.audioLp.reset();
+    this.audioLp1.reset();
+    this.audioLp2.reset();
     this.deemphL.reset();
     if (this.pilotBp) this.pilotBp.reset();
-    if (this.audioLpR) this.audioLpR.reset();
+    if (this.audioLpR1) this.audioLpR1.reset();
+    if (this.audioLpR2) this.audioLpR2.reset();
     if (this.deemphR) this.deemphR.reset();
     this._initialized = false;
   }

@@ -212,8 +212,8 @@ export class SdrAudioEngine {
     }
     this.pendingSources.clear();
     // Reset the schedule so the next frame plays with a small look-ahead
-    // (20ms — same as the buffer look-ahead, to absorb jitter).
-    this.nextStartTime = this.ctx.currentTime + 0.02;
+    // (30ms — same as the buffer look-ahead, to absorb jitter).
+    this.nextStartTime = this.ctx.currentTime + 0.03;
   }
 
   /** Push a real demodulated audio frame into the output queue.
@@ -236,10 +236,10 @@ export class SdrAudioEngine {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.connect(this.realGain);
-    // Schedule back-to-back with previously queued frames. 20ms look-ahead
-    // is the sweet spot: enough to absorb minor network jitter without
-    // causing perceptible lag.
-    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.02);
+    // Schedule back-to-back with previously queued frames. 30ms look-ahead
+    // absorbs network jitter. Was 20ms — too tight for desktop mode where
+    // Electron + Next.js + bridge compete for CPU.
+    const start = Math.max(this.nextStartTime, ctx.currentTime + 0.03);
     src.start(start);
     this.nextStartTime = start + samples.length / sampleRate;
     // Track for cancellation

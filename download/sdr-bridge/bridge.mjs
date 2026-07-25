@@ -127,9 +127,10 @@ function inferTunerName(id) {
 }
 
 let iqBuffer = Buffer.alloc(0);
-// Smaller chunks + faster flush = new frequency's audio plays sooner
-// after retune. Was 32768 bytes @ 50ms; now 16384 @ 16ms (~60 Hz).
-const CHUNK_SIZE = 16384;
+// 32KB chunks at 32ms (~30 Hz) — good balance of latency vs stability.
+// Smaller chunks (16KB@16ms) caused too much WebSocket overhead in
+// desktop mode where Electron + Next.js + bridge all share CPU.
+const CHUNK_SIZE = 32768;
 setInterval(() => {
   if (iqBuffer.length === 0 || clients.size === 0) return;
   while (iqBuffer.length >= CHUNK_SIZE) {
@@ -137,7 +138,7 @@ setInterval(() => {
     iqBuffer = iqBuffer.subarray(CHUNK_SIZE);
     shipIqFrame(chunk);
   }
-}, 16);
+}, 32);
 
 function onIqData(buf) {
   if (!streaming || clients.size === 0) return;
