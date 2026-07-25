@@ -38,19 +38,22 @@ const PRESETS: Record<string, number[]> = {
 const EQ_STORAGE_KEY = "rtl-sdr-v3-console-eq-v1";
 
 function loadEq(): { gains: number[]; bypass: boolean } {
-  if (typeof window === "undefined") return { gains: [...PRESETS.Flat], bypass: false };
+  // Default: bypass=true (EQ off). 10 biquad filters per audio sample
+  // is significant CPU load on the audio thread. User must explicitly
+  // click "ACTIVE" to enable the EQ.
+  if (typeof window === "undefined") return { gains: [...PRESETS.Flat], bypass: true };
   try {
     const raw = window.localStorage.getItem(EQ_STORAGE_KEY);
-    if (!raw) return { gains: [...PRESETS.Flat], bypass: false };
+    if (!raw) return { gains: [...PRESETS.Flat], bypass: true };
     const parsed = JSON.parse(raw);
     return {
       gains: Array.isArray(parsed.gains) && parsed.gains.length === 10
         ? parsed.gains
         : [...PRESETS.Flat],
-      bypass: parsed.bypass === true,
+      bypass: parsed.bypass !== false, // default to bypass=true unless explicitly false
     };
   } catch {
-    return { gains: [...PRESETS.Flat], bypass: false };
+    return { gains: [...PRESETS.Flat], bypass: true };
   }
 }
 
