@@ -91,11 +91,10 @@ class FmDemod implements Demodulator {
   private stereoEnabled = false;
 
   // Pre-decimation: decimate from SDR rate to ~384 kHz before demodulation.
-  // FM only needs ±100 kHz bandwidth (180 kHz channel + pilot + RDS).
-  // Running at 384 kHz instead of 2.4 MHz = 6x less atan2 calls + 6x less
-  // filter calls. Massive CPU savings with zero quality loss.
+  // Need SEPARATE filter instances for I and Q — sharing one corrupts state.
   private decimation: number = 1;
-  private preDecimLp: Biquad;  // anti-aliasing low-pass before decimation
+  private preDecimLpI: Biquad;  // anti-aliasing low-pass for I channel
+  private preDecimLpQ: Biquad;  // anti-aliasing low-pass for Q channel
 
   // Post-decimation filters (run at decimated rate, ~384 kHz)
   private audioLp1: Biquad;  // 15 kHz low-pass stage 1
@@ -131,7 +130,8 @@ class FmDemod implements Demodulator {
   constructor(bandwidth: number, deviation: number, _audioCutoff: number) {
     this.deviation = deviation;
     this.isWide = deviation >= 50000;
-    this.preDecimLp = new Biquad();
+    this.preDecimLpI = new Biquad();
+    this.preDecimLpQ = new Biquad();
     this.audioLp1 = new Biquad();
     this.audioLp2 = new Biquad();
     this.deemphL = new Biquad();
@@ -181,12 +181,11 @@ class FmDemod implements Demodulator {
     const mpx = this.mpxBuf;
     const lpr = this.lprBuf;
 
-    // --- Step 1: Pre-decimate (anti-alias filter both I and Q) ---
-    // Low-pass at 150 kHz (covers full FM multiplex) before decimating.
-    // Must filter BOTH I and Q — filtering only I corrupts the phase.
+    // --- Step 1: Pre-decimate (anti-alias filter I and Q SEPARATELY) ---
+    // Each channel needs its own filter instance — sharing corrupts state.
     for (let i = 0, j = 0; i < n; i++) {
-      const fi = this.preDecimLp.process(iq[i * 2]);
-      const fq = this.preDecimLp.process(iq[i * 2 + 1]);
+      const fi = this.preDecimLpI.process(iq[i * 2]);
+      const fq = this.preDecimLpQ.process(iq[i * 2 + 1]);
       if (i % this.decimation === 0 && j < demodLen) {
         // FM demodulate using Math.atan2 (correct, no approximation)
         const phase = Math.atan2(fq, fi);
@@ -249,26 +248,29 @@ class FmDemod implements Demodulator {
   }
 
   private _init(sampleRate: number) {
-    // Pre-decimation anti-aliasing: low-pass at 150 kHz (covers full FM multiplex)
-    this.preDecimLp.setLowpass(sampleRate, 150000, 0.707);
+    // Pre-decimation anti-aliasing: low-pass at 100 kHz (enough for FM
+    // multiplex: 53 kHz max for SCA). Using 100 kHz instead of 150 kHz
+    // gives more attenuation at the Nyquist of 192 kHz.
+    this.preDecimLpI.setLowpass(sampleRate, 100000, 0.707);
+    this.preDecimLpQ.setLowpass(sampleRate, 100000, 0.707);
 
     // Decimation factor to get to ~384 kHz
     this.decimation = Math.max(1, Math.floor(sampleRate / 384000));
     const demodRate = sampleRate / this.decimation;
 
-    // Audio low-pass at 15 kHz at the decimated rate (much sharper at 384 kHz
-    // than at 2.4 MHz because the biquad has more relative headroom)
+    // Audio low-pass at 15 kHz at the decimated rate
     this.audioLp1.setLowpass(demodRate, 15000, 0.707);
     this.audioLp2.setLowpass(demodRate, 15000, 0.54);
-    // Post-decimation: de-emphasis at 48 kHz output rate
+    // De-emphasis: 75 µs → 2122 Hz. Q=0.5 makes it a 1st-order RC
+    // equivalent (Q=0.707 is 2nd-order Butterworth, wrong for de-emphasis).
     this._outRate = Math.floor(demodRate / Math.max(1, Math.floor(demodRate / 48000)));
-    this.deemphL.setLowpass(this._outRate, 2122, 0.707);
+    this.deemphL.setLowpass(this._outRate, 2122, 0.5);
 
     if (this.stereoEnabled) {
       this.pilotBp!.setLowpass(demodRate, 19000, 30);
       this.audioLpR1!.setLowpass(demodRate, 15000, 0.707);
       this.audioLpR2!.setLowpass(demodRate, 15000, 0.54);
-      this.deemphR!.setLowpass(this._outRate, 2122, 0.707);
+      this.deemphR!.setLowpass(this._outRate, 2122, 0.5);
       this.pllFreqNominal = (2 * Math.PI * 19000) / demodRate;
       this.pllFreq = this.pllFreqNominal;
       this.pllPhase = 0;
@@ -282,7 +284,8 @@ class FmDemod implements Demodulator {
     this.pllPhase = 0;
     this.pllLockCount = 0;
     this.pllLocked = false;
-    this.preDecimLp.reset();
+    this.preDecimLpI.reset();
+    this.preDecimLpQ.reset();
     this.audioLp1.reset();
     this.audioLp2.reset();
     this.deemphL.reset();
