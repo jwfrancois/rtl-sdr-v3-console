@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
-import { useRenderThrottle } from "@/lib/render-throttle";
+import { PausedCanvas } from "./paused-canvas";
+import { useNonEssentialThrottle } from "@/lib/render-throttle";
 import { TrendingUp } from "lucide-react";
 
 /**
@@ -23,7 +24,7 @@ export function SignalHistoryGraph() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const { shouldRender } = useRenderThrottle();
+  const { shouldRender, isActive } = useNonEssentialThrottle();
   const historyRef = useRef<number[]>([]);
   const lastSampleRef = useRef(0);
   const [stats, setStats] = useState({ min: -100, max: -100, avg: -100 });
@@ -157,6 +158,13 @@ export function SignalHistoryGraph() {
     };
   }, [shouldRender]);
 
+  if (!isActive) {
+    return (
+      <div className="sdr-panel rounded-xl p-4">
+        <PausedCanvas label="{label}" />
+      </div>
+    );
+  }
   return (
     <div className="sdr-panel rounded-lg p-3">
       <div className="flex items-center justify-between mb-1.5">

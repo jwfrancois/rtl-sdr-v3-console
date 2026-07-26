@@ -5,6 +5,7 @@ import { getAudioEngine } from "@/lib/sdr-audio";
 import { useSdrStore } from "@/lib/sdr-store";
 import { Sliders, RotateCcw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PausedCanvas } from "./paused-canvas";
 import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
@@ -89,7 +90,7 @@ export function GraphicEqPanel() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const { shouldRender } = useNonEssentialThrottle();
+  const { shouldRender, isActive } = useNonEssentialThrottle();
 
   // Apply EQ changes to the audio engine
   useEffect(() => {
@@ -265,6 +266,13 @@ export function GraphicEqPanel() {
 
   const isRealMode = backend === "real" && hwConnected;
 
+  if (!isActive) {
+    return (
+      <div className="sdr-panel rounded-xl p-4">
+        <PausedCanvas label="{label}" />
+      </div>
+    );
+  }
   return (
     <div className="sdr-panel sdr-panel-glow rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">

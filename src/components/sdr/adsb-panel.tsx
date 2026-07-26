@@ -6,6 +6,7 @@ import { useSdrStore } from "@/lib/sdr-store";
 import type { AdsbState, Aircraft } from "@/lib/real-sdr/adsb";
 import { Plane, Radar, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PausedCanvas } from "./paused-canvas";
 import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
@@ -71,6 +72,13 @@ export function AdsbPanel() {
     );
   }
 
+  if (!isActive) {
+    return (
+      <div className="sdr-panel rounded-xl p-4">
+        <PausedCanvas label="{label}" />
+      </div>
+    );
+  }
   return (
     <div className="sdr-panel sdr-panel-glow rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
@@ -131,7 +139,7 @@ function RadarView({ aircraft }: { aircraft: Aircraft[] }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const { shouldRender } = useNonEssentialThrottle();
+  const { shouldRender, isActive } = useNonEssentialThrottle();
 
   useEffect(() => {
     const draw = () => {

@@ -3,7 +3,8 @@
 import { useEffect, useRef } from "react";
 import { getAudioEngine } from "@/lib/sdr-audio";
 import { useSdrStore } from "@/lib/sdr-store";
-import { useRenderThrottle } from "@/lib/render-throttle";
+import { PausedCanvas } from "./paused-canvas";
+import { useNonEssentialThrottle } from "@/lib/render-throttle";
 import { Disc3 } from "lucide-react";
 
 /**
@@ -23,7 +24,7 @@ export function CircularVisualizer({ size = 120 }: { size?: number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const rotationRef = useRef(0);
-  const { shouldRender } = useRenderThrottle();
+  const { shouldRender, isActive } = useNonEssentialThrottle();
   const audioEnabled = useSdrStore((s) => s.audioEnabled);
 
   useEffect(() => {
@@ -127,6 +128,13 @@ export function CircularVisualizer({ size = 120 }: { size?: number }) {
     };
   }, [shouldRender, audioEnabled, size]);
 
+  if (!isActive) {
+    return (
+      <div className="sdr-panel rounded-xl p-4">
+        <PausedCanvas label="{label}" />
+      </div>
+    );
+  }
   return (
     <div className="sdr-panel rounded-lg p-2 flex flex-col items-center">
       <div className="flex items-center gap-1.5 mb-1 text-[9px] uppercase tracking-widest text-[oklch(0.55_0.04_250)]">

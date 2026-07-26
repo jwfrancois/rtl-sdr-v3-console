@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { Radio, RotateCw } from "lucide-react";
+import { PausedCanvas } from "./paused-canvas";
 import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
@@ -31,7 +32,7 @@ export function TuningDial() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const { shouldRender } = useNonEssentialThrottle();
+  const { shouldRender, isActive } = useNonEssentialThrottle();
 
   // Drag state
   const dragRef = useRef<{
@@ -252,6 +253,13 @@ export function TuningDial() {
     }
   }, [frequency, setFrequency]);
 
+  if (!isActive) {
+    return (
+      <div className="sdr-panel rounded-xl p-4">
+        <PausedCanvas label="{label}" />
+      </div>
+    );
+  }
   return (
     <div className="sdr-panel sdr-panel-glow rounded-xl p-4">
       <div className="flex items-center justify-between mb-2">

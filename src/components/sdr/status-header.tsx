@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { bandForFrequency, findStationAt, formatFrequency } from "@/lib/sdr-engine";
-import { RadioTower, Cpu, Activity, Clock, Wifi } from "lucide-react";
+import { useRenderMode } from "@/lib/render-throttle";
+import { RadioTower, Cpu, Activity, Clock, Wifi, Zap, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Animated dot used in the header to indicate "live" state. */
@@ -156,6 +157,8 @@ export function StatusHeader() {
             color={recording ? "red" : "dim"}
             pulse={recording}
           />
+          {/* Performance mode toggle */}
+          <PerformanceModeToggle />
         </div>
 
         {/* Clock */}
@@ -226,4 +229,29 @@ function formatUptime(s: number): string {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
+/** Performance mode toggle — switches between "Full" (all canvases)
+ *  and "Essential" (only spectrum/waterfall/meters) to save CPU. */
+function PerformanceModeToggle() {
+  const [mode, setMode] = useRenderMode();
+  const isFull = mode === "full";
+  return (
+    <button
+      type="button"
+      onClick={() => setMode(isFull ? "essential" : "full")}
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] sdr-mono uppercase tracking-wider transition-all",
+        isFull
+          ? "bg-[oklch(0.80_0.18_155/0.14)] border-[oklch(0.80_0.18_155/0.5)] text-[oklch(0.92_0.04_155)]"
+          : "bg-[oklch(0.82_0.16_70/0.14)] border-[oklch(0.82_0.16_70/0.5)] text-[oklch(0.92_0.04_70)]",
+      )}
+      title={isFull
+        ? "Full mode: all canvases active. Click to pause non-essential canvases for better audio."
+        : "Essential mode: only spectrum/waterfall/meters active. Click to enable all canvases."}
+    >
+      {isFull ? <Eye className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
+      {isFull ? "FULL" : "ESSENTIAL"}
+    </button>
+  );
 }
