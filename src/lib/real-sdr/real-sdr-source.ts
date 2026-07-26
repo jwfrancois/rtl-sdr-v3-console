@@ -487,9 +487,7 @@ export class RealSdrSource implements SdrSource {
     if (runDecoders && this.demodKind === "WFM") {
       const mpx = (this.demod as any).mpxBuf;
       if (mpx && mpx.length > 0) {
-        const demodRate = (this.demod as any)._sdrRate
-          ? Math.floor((this.demod as any)._sdrRate / Math.max(1, (this.demod as any).decimation))
-          : 384000;
+        const demodRate = block.sampleRate; // full SDR rate now
         if (this.rdsCbs.size > 0) {
           this.rds.process(mpx, demodRate);
           if (now - this.lastRdsEmit > 200) {
