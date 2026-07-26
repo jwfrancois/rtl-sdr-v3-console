@@ -156,16 +156,16 @@ class FmDemod implements Demodulator {
     }
 
     const n = iq.length / 2;
-    const decimation = Math.max(1, Math.floor(sampleRate / this._outRate));
 
     // Pre-decimate: reduce from SDR rate to ~384 kHz for FM demodulation.
-    // This is the single biggest CPU savings: 2.4 MHz → 384 kHz = 6x less
-    // atan2 calls + 6x less biquad filter calls, with zero quality loss
-    // (FM multiplex only needs ±100 kHz).
     const targetDemodRate = 384000;
     this.decimation = Math.max(1, Math.floor(sampleRate / targetDemodRate));
     const demodRate = sampleRate / this.decimation;
     const demodLen = Math.floor(n / this.decimation);
+
+    // Output decimation: from demodulated rate to 48 kHz
+    const outDecimation = Math.max(1, Math.floor(demodRate / this._outRate));
+    const outLen = Math.floor(demodLen / outDecimation);
 
     // Ensure buffers
     if (this.mpxBuf.length !== demodLen) {
@@ -173,7 +173,6 @@ class FmDemod implements Demodulator {
       this.lprBuf = new Float32Array(demodLen);
       if (this.stereoEnabled) this.lmrBuf = new Float32Array(demodLen);
     }
-    const outLen = Math.floor(demodLen / decimation);
     if (this.outLBuf.length !== outLen) {
       this.outLBuf = new Float32Array(outLen);
       if (this.stereoEnabled) this.outRBuf = new Float32Array(outLen);
@@ -228,9 +227,9 @@ class FmDemod implements Demodulator {
       }
 
       if (this.pllLocked) {
-        // Stereo: decimate, then de-emphasis at output rate
+        // Stereo: decimate from demod rate to output rate
         for (let i = 0; i < outLen; i++) {
-          const idx = i * decimation;
+          const idx = i * outDecimation;
           const l = (lpr[idx] + lmr[idx]) * 0.5;
           const r = (lpr[idx] - lmr[idx]) * 0.5;
           this.outLBuf[i] = this.deemphL.process(l);
@@ -240,17 +239,15 @@ class FmDemod implements Demodulator {
       }
     }
 
-    // --- Mono: decimate L+R, then de-emphasis at output rate ---
+    // --- Mono: decimate from demod rate to output rate, then de-emphasis ---
     for (let i = 0; i < outLen; i++) {
-      this.outLBuf[i] = this.deemphL.process(lpr[i * decimation]);
+      this.outLBuf[i] = this.deemphL.process(lpr[i * outDecimation]);
     }
     return { audio: this.outLBuf, audioRate: this._outRate, stereo: false };
   }
 
   private _init(sampleRate: number) {
-    // Pre-decimation anti-aliasing: low-pass at 100 kHz (enough for FM
-    // multiplex: 53 kHz max for SCA). Using 100 kHz instead of 150 kHz
-    // gives more attenuation at the Nyquist of 192 kHz.
+    // Pre-decimation anti-aliasing: low-pass at 100 kHz
     this.preDecimLpI.setLowpass(sampleRate, 100000, 0.707);
     this.preDecimLpQ.setLowpass(sampleRate, 100000, 0.707);
 
@@ -261,9 +258,11 @@ class FmDemod implements Demodulator {
     // Audio low-pass at 15 kHz at the decimated rate
     this.audioLp1.setLowpass(demodRate, 15000, 0.707);
     this.audioLp2.setLowpass(demodRate, 15000, 0.54);
-    // De-emphasis: 75 µs → 2122 Hz. Q=0.5 makes it a 1st-order RC
-    // equivalent (Q=0.707 is 2nd-order Butterworth, wrong for de-emphasis).
-    this._outRate = Math.floor(demodRate / Math.max(1, Math.floor(demodRate / 48000)));
+
+    // Output rate: decimate from demod rate to ~48 kHz
+    const outDecim = Math.max(1, Math.floor(demodRate / 48000));
+    this._outRate = Math.floor(demodRate / outDecim);
+    // De-emphasis: 75 µs → 2122 Hz, Q=0.5 (1st-order RC equivalent)
     this.deemphL.setLowpass(this._outRate, 2122, 0.5);
 
     if (this.stereoEnabled) {
