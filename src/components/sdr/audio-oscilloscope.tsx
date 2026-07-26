@@ -5,12 +5,14 @@ import { getAudioEngine } from "@/lib/sdr-audio";
 import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { AudioLines } from "lucide-react";
+import { useRenderThrottle } from "@/lib/render-throttle";
 
 /** Mini audio oscilloscope that reads the AudioEngine's analyser output. */
 export function AudioOscilloscope({ height = 64 }: { height?: number }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useRenderThrottle();
   const freq = useSdrStore((s) => s.frequency);
   const audioEnabled = useSdrStore((s) => s.audioEnabled);
 
@@ -21,6 +23,7 @@ export function AudioOscilloscope({ height = 64 }: { height?: number }) {
 
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

@@ -358,9 +358,9 @@ export class RealSdrSource implements SdrSource {
     this.frameCount++;
     const now = performance.now();
 
-    // 1) Compute spectrum every OTHER block (30 Hz is plenty for display).
-    //    The FFT is expensive — skipping every other block cuts CPU by 50%.
-    if (this.frameCount % 2 === 0) {
+    // 1) Compute spectrum every 4th block (15 Hz — plenty for display).
+    //    The FFT is the most expensive non-audio operation.
+    if (this.frameCount % 4 === 0) {
       computeSpectrumDbfs(block.data, this.spectrumBuf);
       for (const cb of this.spectrumCbs) {
         cb(this.spectrumBuf, block.frequency, block.sampleRate);

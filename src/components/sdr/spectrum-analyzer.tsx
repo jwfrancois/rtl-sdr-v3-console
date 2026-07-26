@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { formatFreqAxis, generateSpectrum } from "@/lib/sdr-engine";
 import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
+import { useRenderThrottle } from "@/lib/render-throttle";
 
 interface Props {
   height?: number;
@@ -17,6 +18,7 @@ export function SpectrumAnalyzer({ height = 220, onSeek, onHover }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useRenderThrottle();
   const lastSpectrumRef = useRef<Float32Array>(new Float32Array(SIZE));
   const smoothRef = useRef<Float32Array>(new Float32Array(SIZE).fill(-100));
   const peakRef = useRef<Float32Array>(new Float32Array(SIZE).fill(-100));
@@ -68,6 +70,7 @@ export function SpectrumAnalyzer({ height = 220, onSeek, onHover }: Props) {
   // Single mount effect that owns the rAF loop.
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

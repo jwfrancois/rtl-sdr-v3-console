@@ -5,6 +5,7 @@ import { getAudioEngine } from "@/lib/sdr-audio";
 import { useSdrStore } from "@/lib/sdr-store";
 import { Sliders, RotateCcw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
  * Graphic Equalizer — 10-band peaking EQ with vertical sliders.
@@ -88,6 +89,7 @@ export function GraphicEqPanel() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useNonEssentialThrottle();
 
   // Apply EQ changes to the audio engine
   useEffect(() => {
@@ -130,6 +132,7 @@ export function GraphicEqPanel() {
   useEffect(() => {
     const stateRef = { gains: [...gains], bypass };
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

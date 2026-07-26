@@ -9,6 +9,7 @@ import {
   waterfallColor,
 } from "@/lib/sdr-engine";
 import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
+import { useRenderThrottle } from "@/lib/render-throttle";
 
 interface Props {
   height?: number;
@@ -22,6 +23,7 @@ export function WaterfallDisplay({ height = 280, onSeek, onHover }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useRenderThrottle();
   const lastSpectrumRef = useRef<Float32Array>(new Float32Array(SIZE));
   const lastDrawTimeRef = useRef(0);
   const dragRef = useRef(false);
@@ -61,6 +63,7 @@ export function WaterfallDisplay({ height = 280, onSeek, onHover }: Props) {
 
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

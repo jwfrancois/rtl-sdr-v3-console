@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Clock, Sun, Moon, Globe } from "lucide-react";
 import { useSdrStore } from "@/lib/sdr-store";
+import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
  * UTC Clock + Greyline indicator.
@@ -22,10 +23,12 @@ export function UtcClock() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useNonEssentialThrottle();
   const frequency = useSdrStore((s) => s.frequency);
 
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

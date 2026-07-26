@@ -6,6 +6,7 @@ import { useSdrStore } from "@/lib/sdr-store";
 import type { AdsbState, Aircraft } from "@/lib/real-sdr/adsb";
 import { Plane, Radar, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNonEssentialThrottle } from "@/lib/render-throttle";
 
 /**
  * ADS-B aircraft tracker — shows a live radar-style polar plot of
@@ -130,9 +131,11 @@ function RadarView({ aircraft }: { aircraft: Aircraft[] }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useNonEssentialThrottle();
 
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

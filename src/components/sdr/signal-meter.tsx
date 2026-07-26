@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { Signal } from "lucide-react";
+import { useRenderThrottle } from "@/lib/render-throttle";
 
 const S_POINTS = ["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "+10", "+20", "+30", "+40", "+50", "+60"];
 
@@ -21,6 +22,7 @@ export function SignalMeter({ level }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useRenderThrottle();
   const smoothedRef = useRef(0);
 
   const frequency = useSdrStore((s) => s.frequency);
@@ -33,6 +35,7 @@ export function SignalMeter({ level }: Props) {
 
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {

@@ -5,6 +5,7 @@ import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { getAudioEngine } from "@/lib/sdr-audio";
 import { onRealAudio } from "@/lib/real-sdr/use-real-sdr";
+import { setAudioPriority } from "@/lib/render-throttle";
 import { Play, Pause, Volume2, VolumeX, Circle, Headphones } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -140,6 +141,7 @@ export function TransportBar({ level }: Props) {
       try {
         getAudioEngine().stop();
       } catch {}
+      setAudioPriority(false);
     };
   }, []);
 
@@ -180,6 +182,12 @@ export function TransportBar({ level }: Props) {
             if (backend === "real" && hwConnected) {
               getAudioEngine().setRealMode(true);
             }
+            // Enable audio priority mode — pauses non-essential canvas
+            // rendering (tuning dial, UTC clock, solar graph, etc.) to
+            // give the audio scheduler maximum CPU.
+            setAudioPriority(true);
+          } else {
+            setAudioPriority(false);
           }
           setAudioEnabled(!audioEnabled);
         }}

@@ -5,6 +5,7 @@ import { useSdrStore } from "@/lib/sdr-store";
 import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { Gauge, Activity, Waves } from "lucide-react";
+import { useRenderThrottle } from "@/lib/render-throttle";
 
 /**
  * SDRCOM Receiver Meter — a professional-grade signal meter with
@@ -47,6 +48,7 @@ export function SdrcomMeter() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const { shouldRender } = useRenderThrottle();
   const peakRef = useRef(-200);
   const peakTimeRef = useRef(0);
   const [reading, setReading] = useState<MeterReading | null>(null);
@@ -165,6 +167,7 @@ export function SdrcomMeter() {
   // Draw the meter bar
   useEffect(() => {
     const draw = () => {
+      if (!shouldRender()) { rafRef.current = requestAnimationFrame(draw); return; }
       const canvas = canvasRef.current;
       const container = containerRef.current;
       if (!canvas || !container) {
