@@ -394,16 +394,10 @@ export class RealSdrSource implements SdrSource {
     //    was the heaviest decoder (atan2 per sample, same as RDS) and only
     //    provides SIS data that RDS already shows. Removing it halves the
     //    atan2 load on FM broadcast.
-    const runDecoders = this.frameCount % 4 === 0;
+    const runDecoders = this.frameCount % 2 === 0;
     if (runDecoders) {
-      // RDS (broadcast FM only)
-      if (this.demodKind === "WFM" && this.rdsCbs.size > 0) {
-        this.rds.process(floatIQ, block.sampleRate);
-        if (now - this.lastRdsEmit > 200) {
-          this.lastRdsEmit = now;
-          for (const cb of this.rdsCbs) cb(this.rds.state);
-        }
-      }
+      // RDS + HD Radio are now run AFTER demodulation (step 7 below)
+      // because they need the FM-demodulated multiplex signal.
 
       // ADS-B (1090 MHz)
       if (block.frequency > 1080e6 && block.frequency < 1100e6 && this.adsbCbs.size > 0) {
@@ -480,16 +474,40 @@ export class RealSdrSource implements SdrSource {
           for (const cb of this.gpsCbs) cb(this.gps.state);
         }
       }
-
-      // HD Radio SIS — REMOVED from per-block path. Was the heaviest
-      // decoder (atan2 per sample, same cost as RDS) and only provides
-      // call letters / ALFN that RDS already shows. The decoder class
-      // still exists for future use, but is not called during audio.
     }
 
     // 6) Demodulate audio — ALWAYS runs (this is what you hear).
     //    This is the ONLY DSP that must run on every block.
     const result = this.demod.process(floatIQ, block.sampleRate);
+
+    // 7) Run RDS + HD Radio on the demodulated multiplex signal (AFTER demod).
+    //    These decoders need the FM-demodulated baseband (the multiplex),
+    //    not the raw IQ. Running them before demodulation would feed them
+    //    the wrong signal.
+    if (runDecoders && this.demodKind === "WFM") {
+      const mpx = (this.demod as any).mpxBuf;
+      if (mpx && mpx.length > 0) {
+        const demodRate = (this.demod as any)._sdrRate
+          ? Math.floor((this.demod as any)._sdrRate / Math.max(1, (this.demod as any).decimation))
+          : 384000;
+        if (this.rdsCbs.size > 0) {
+          this.rds.process(mpx, demodRate);
+          if (now - this.lastRdsEmit > 200) {
+            this.lastRdsEmit = now;
+            for (const cb of this.rdsCbs) cb(this.rds.state);
+          }
+        }
+        if (this.hdRadioCbs.size > 0 &&
+            block.frequency >= 87.5e6 && block.frequency <= 108e6) {
+          this.hdRadio.process(mpx, demodRate);
+          if (now - this.lastHdRadioEmit > 500) {
+            this.lastHdRadioEmit = now;
+            for (const cb of this.hdRadioCbs) cb(this.hdRadio.state);
+          }
+        }
+      }
+    }
+
     const frame: AudioFrame = {
       samples: result.audio,
       samplesRight: result.audioRight,

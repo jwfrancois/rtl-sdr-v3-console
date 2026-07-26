@@ -60,60 +60,77 @@ export function SolarConditionsPanel() {
     setLoading(true);
     setError(null);
     try {
-      // NOAA SWPC endpoints — all free, no auth required
-      // Use a CORS proxy fallback if direct fails (sandboxed envs block CORS)
-      const proxy = "https://corsproxy.io/?";
+      // NOAA SWPC endpoints — all free, no auth required.
+      // In Electron (desktop mode), CORS is not enforced, so we can
+      // fetch directly. In a browser, we try direct first then fall
+      // back to a CORS proxy.
+      const urls = {
+        kIndex: "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json",
+        xray: "https://services.swpc.noaa.gov/json/goes/primary/dxrays-6-hour.json",
+        sfi: "https://services.swpc.noaa.gov/json/solar-cycle/solar-cycle-25-f10.7-centred.json",
+        sunspots: "https://services.swpc.noaa.gov/json/solar-cycle/sunspots.json",
+        aIndex: "https://services.swpc.noaa.gov/json/planetary_ap_index_1m.json",
+      };
 
-      // K-index (planetary, last 24h)
+      const tryFetch = async (url: string): Promise<any | null> => {
+        // Try direct first (works in Electron)
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          if (res.ok) return await res.json();
+        } catch {}
+        // Try CORS proxy (works in browser)
+        try {
+          const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(10000) });
+          if (res.ok) return await res.json();
+        } catch {}
+        return null;
+      };
+
+      // K-index
       let kIndex: number | null = null;
-      try {
-        const kRes = await fetch(`${proxy}${encodeURIComponent("https://services.swpc.noaa.gov/json/planetary_k_index_1m.json")}`);
-        const kData = await kRes.json();
-        if (Array.isArray(kData) && kData.length > 0) {
-          kIndex = Number(kData[kData.length - 1]?.kp_index ?? 0);
-        }
-      } catch {}
+      const kData = await tryFetch(urls.kIndex);
+      if (Array.isArray(kData) && kData.length > 0) {
+        kIndex = Number(kData[kData.length - 1]?.kp_index ?? 0);
+      }
 
-      // X-ray flux (last 6 hours)
+      // X-ray flux
       let xrayClass: string | null = null;
-      try {
-        const xRes = await fetch(`${proxy}${encodeURIComponent("https://services.swpc.noaa.gov/json/goes/primary/dxrays-6-hour.json")}`);
-        const xData = await xRes.json();
-        if (Array.isArray(xData) && xData.length > 0) {
-          const flux = Number(xData[xData.length - 1]?.flux ?? 0);
-          xrayClass = fluxToClass(flux);
-        }
-      } catch {}
+      const xData = await tryFetch(urls.xray);
+      if (Array.isArray(xData) && xData.length > 0) {
+        const flux = Number(xData[xData.length - 1]?.flux ?? 0);
+        xrayClass = fluxToClass(flux);
+      }
 
-      // SFI (Solar Flux Index) — today's observed value
+      // SFI
       let sfi: number | null = null;
+      const sfiData = await tryFetch(urls.sfi);
+      if (Array.isArray(sfiData) && sfiData.length > 0) {
+        sfi = Number(sfiData[sfiData.length - 1]?.value ?? 0);
+      }
+
+      // Sunspots
       let sunspots: number | null = null;
-      try {
-        const sfiRes = await fetch(`${proxy}${encodeURIComponent("https://services.swpc.noaa.gov/json/solar-cycle/solar-cycle-25-f10.7-centred.json")}`);
-        const sfiData = await sfiRes.json();
-        if (Array.isArray(sfiData) && sfiData.length > 0) {
-          sfi = Number(sfiData[sfiData.length - 1]?.value ?? 0);
-        }
-      } catch {}
+      const ssData = await tryFetch(urls.sunspots);
+      if (Array.isArray(ssData) && ssData.length > 0) {
+        sunspots = Number(ssData[ssData.length - 1]?.value ?? ssData[ssData.length - 1]?.smoothed ?? 0);
+      }
 
-      // Sunspot number
-      try {
-        const ssRes = await fetch(`${proxy}${encodeURIComponent("https://services.swpc.noaa.gov/json/solar-cycle/sunspots.json")}`);
-        const ssData = await ssRes.json();
-        if (Array.isArray(ssData) && ssData.length > 0) {
-          sunspots = Number(ssData[ssData.length - 1]?.value ?? ssData[ssData.length - 1]?.smoothed ?? 0);
-        }
-      } catch {}
-
-      // A-index (estimated planetary)
+      // A-index
       let aIndex: number | null = null;
-      try {
-        const aRes = await fetch(`${proxy}${encodeURIComponent("https://services.swpc.noaa.gov/json/planetary_ap_index_1m.json")}`);
-        const aData = await aRes.json();
-        if (Array.isArray(aData) && aData.length > 0) {
-          aIndex = Number(aData[aData.length - 1]?.ap ?? 0);
-        }
-      } catch {}
+      const aData = await tryFetch(urls.aIndex);
+      if (Array.isArray(aData) && aData.length > 0) {
+        aIndex = Number(aData[aData.length - 1]?.ap ?? 0);
+      }
+
+      // If all failed, use fallback static values
+      if (kIndex === null && xrayClass === null && sfi === null) {
+        setError("Solar data unavailable — showing approximate values");
+        kIndex = 2.0;
+        aIndex = 8;
+        sfi = 145;
+        sunspots = 145;
+        xrayClass = "B5.0";
+      }
 
       setData({
         kIndex, aIndex, sfi, sunspots, xrayClass,
