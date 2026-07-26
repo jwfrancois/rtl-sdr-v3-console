@@ -96,16 +96,16 @@ class FmDemod implements Demodulator {
   private preDecimLpI: Biquad;  // anti-aliasing low-pass for I channel
   private preDecimLpQ: Biquad;  // anti-aliasing low-pass for Q channel
 
-  // Post-decimation filters (run at decimated rate, ~384 kHz)
+  // Post-decimation filters (run at demodulated rate, ~384 kHz)
   private audioLp1: Biquad;  // 15 kHz low-pass stage 1
   private audioLp2: Biquad;  // 15 kHz low-pass stage 2
+  // De-emphasis at the DEMODULATED rate (not output rate) — this is critical.
+  // Running de-emphasis at 48 kHz gives wrong time constants.
+  private deemphL: Biquad;
   // Stereo-only filters (only allocated when stereo is enabled)
   private pilotBp: Biquad | null = null;   // 19 kHz bandpass
   private audioLpR1: Biquad | null = null;  // 15 kHz low-pass for L-R stage 1
   private audioLpR2: Biquad | null = null;  // 15 kHz low-pass for L-R stage 2
-
-  // Post-decimation de-emphasis (run at 48 kHz output rate)
-  private deemphL: Biquad;
   private deemphR: Biquad | null = null;
 
   // Pilot PLL state
@@ -197,11 +197,11 @@ class FmDemod implements Demodulator {
       }
     }
 
-    // --- Step 2: Low-pass L+R at 15 kHz (cascaded biquads, demod rate) ---
-    // Two stages give a much sharper cutoff than one — critical for
-    // rejecting the 19 kHz pilot and 23-53 kHz L-R subcarrier.
+    // --- Step 2: Low-pass L+R at 15 kHz + de-emphasis at DEMOD rate ---
+    // Both filters run at 384 kHz BEFORE decimation to 48 kHz.
+    // De-emphasis must run at the demodulated rate for correct time constant.
     for (let i = 0; i < demodLen; i++) {
-      lpr[i] = this.audioLp2.process(this.audioLp1.process(mpx[i]));
+      lpr[i] = this.deemphL.process(this.audioLp2.process(this.audioLp1.process(mpx[i])));
     }
 
     // --- Step 3: Stereo path (only if enabled AND PLL locks) ---
@@ -221,27 +221,25 @@ class FmDemod implements Demodulator {
         this.pllLocked = this.pllLockCount > 50;
         lmr[i] = mpx[i] * Math.cos(2 * this.pllPhase);
       }
-      // Low-pass L-R at 15 kHz (cascaded biquads)
+      // Low-pass L-R at 15 kHz + de-emphasis at DEMOD rate
       for (let i = 0; i < demodLen; i++) {
-        lmr[i] = this.audioLpR2.process(this.audioLpR1.process(lmr[i]));
+        lmr[i] = this.deemphR!.process(this.audioLpR2.process(this.audioLpR1.process(lmr[i])));
       }
 
       if (this.pllLocked) {
-        // Stereo: decimate from demod rate to output rate
+        // Stereo: just decimate (de-emphasis already applied at demod rate)
         for (let i = 0; i < outLen; i++) {
           const idx = i * outDecimation;
-          const l = (lpr[idx] + lmr[idx]) * 0.5;
-          const r = (lpr[idx] - lmr[idx]) * 0.5;
-          this.outLBuf[i] = this.deemphL.process(l);
-          this.outRBuf[i] = this.deemphR!.process(r);
+          this.outLBuf[i] = (lpr[idx] + lmr[idx]) * 0.5;
+          this.outRBuf[i] = (lpr[idx] - lmr[idx]) * 0.5;
         }
         return { audio: this.outLBuf, audioRight: this.outRBuf, audioRate: this._outRate, stereo: true };
       }
     }
 
-    // --- Mono: decimate from demod rate to output rate, then de-emphasis ---
+    // --- Mono: just decimate (de-emphasis already applied at demod rate) ---
     for (let i = 0; i < outLen; i++) {
-      this.outLBuf[i] = this.deemphL.process(lpr[i * outDecimation]);
+      this.outLBuf[i] = lpr[i * outDecimation];
     }
     return { audio: this.outLBuf, audioRate: this._outRate, stereo: false };
   }
@@ -255,21 +253,27 @@ class FmDemod implements Demodulator {
     this.decimation = Math.max(1, Math.floor(sampleRate / 384000));
     const demodRate = sampleRate / this.decimation;
 
-    // Audio low-pass at 15 kHz at the decimated rate
+    // Audio low-pass at 15 kHz at the demodulated rate
     this.audioLp1.setLowpass(demodRate, 15000, 0.707);
     this.audioLp2.setLowpass(demodRate, 15000, 0.54);
+
+    // De-emphasis: 75 µs → 2122 Hz. MUST run at the DEMODULATED rate,
+    // not the output rate. The 75 µs time constant is defined in terms
+    // of real time (75e-6 seconds), and a biquad configured for 2122 Hz
+    // at 384 kHz gives the correct 75 µs response. Configuring it at
+    // 48 kHz would give a different (wrong) time constant.
+    // Q=0.5 → 1st-order RC equivalent (correct for FM de-emphasis).
+    this.deemphL.setLowpass(demodRate, 2122, 0.5);
 
     // Output rate: decimate from demod rate to ~48 kHz
     const outDecim = Math.max(1, Math.floor(demodRate / 48000));
     this._outRate = Math.floor(demodRate / outDecim);
-    // De-emphasis: 75 µs → 2122 Hz, Q=0.5 (1st-order RC equivalent)
-    this.deemphL.setLowpass(this._outRate, 2122, 0.5);
 
     if (this.stereoEnabled) {
       this.pilotBp!.setLowpass(demodRate, 19000, 30);
       this.audioLpR1!.setLowpass(demodRate, 15000, 0.707);
       this.audioLpR2!.setLowpass(demodRate, 15000, 0.54);
-      this.deemphR!.setLowpass(this._outRate, 2122, 0.5);
+      this.deemphR!.setLowpass(demodRate, 2122, 0.5);
       this.pllFreqNominal = (2 * Math.PI * 19000) / demodRate;
       this.pllFreq = this.pllFreqNominal;
       this.pllPhase = 0;
