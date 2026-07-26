@@ -37,6 +37,9 @@ import { GraphicEqPanel } from "@/components/sdr/graphic-eq-panel";
 import { AfcControl } from "@/components/sdr/afc-control";
 import { SleepTimer } from "@/components/sdr/sleep-timer";
 import { SignalHistoryGraph } from "@/components/sdr/signal-history-graph";
+import { NoiseGate } from "@/components/sdr/noise-gate";
+import { DxClusterPanel } from "@/components/sdr/dx-cluster-panel";
+import { CircularVisualizer } from "@/components/sdr/circular-visualizer";
 import { useSdrStore, hydrateFromStorage } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -77,6 +80,7 @@ export default function Home() {
           {/* CENTER column: spectrum + waterfall + transport */}
           <section className="lg:col-span-6 flex flex-col gap-4">
             <TransportBar />
+            <NoiseGate />
 
             {/* Spectrum panel */}
             <div className="sdr-panel sdr-panel-glow rounded-xl p-4 relative">
@@ -142,10 +146,11 @@ export default function Home() {
               <WaterfallDisplay height={280} onHover={setHoverFreq} />
             </div>
 
-            {/* Signal meter + Audio scope */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Signal meter + Audio scope + Visualizer */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <SignalMeter />
               <AudioOscilloscope height={64} />
+              <CircularVisualizer size={120} />
             </div>
 
             {/* Signal history graph */}
@@ -179,10 +184,11 @@ export default function Home() {
             <GpsPanel />
           </section>
 
-          {/* RIGHT column: UTC clock + solar + station card + recording + messages + bookmarks */}
+          {/* RIGHT column: UTC clock + solar + DX cluster + station card + bookmarks */}
           <aside className="lg:col-span-3 flex flex-col gap-4">
             <UtcClock />
             <SolarConditionsPanel />
+            <DxClusterPanel />
             <ActiveStationCard />
             <div>
               <RecordingPanel />
