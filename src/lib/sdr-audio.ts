@@ -88,26 +88,22 @@ export class SdrAudioEngine {
   private eqOutput: GainNode | null = null;
   private eqBypass = false;
   private eqGains: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // dB per band
+  /** Audio compressor — normalizes volume between stations. */
+  private compressor: DynamicsCompressorNode | null = null;
 
   /** EQ band center frequencies (Hz) — standard ISO 1/3-octave spacing. */
   static readonly EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
   setRealMode(enabled: boolean) {
-    // Guard: don't do anything if we're already in this mode. This is
-    // critical because pushRealAudioFrame() calls setRealMode(true) on
-    // every audio frame (~100 Hz), and the setup below is expensive
-    // enough to cause choppiness if it runs every frame.
     if (this.realMode === enabled) return;
     this.realMode = enabled;
     if (enabled) {
-      // Mute the synth voices
       this.setStation(null, 0, 0);
-      // Ensure the real-audio gain node exists
       const ctx = this.ensureCtx();
       if (!this.realGain) {
         this.realGain = ctx.createGain();
         this.realGain.gain.value = 1;
-        // Build the EQ chain: realGain -> eqInput -> [10 biquads] -> eqOutput -> masterGain
+        // Build chain: realGain → [EQ] → compressor → masterGain
         this.eqInput = ctx.createGain();
         this.eqOutput = ctx.createGain();
         this.eqFilters = [];
@@ -116,15 +112,28 @@ export class SdrAudioEngine {
           const filter = ctx.createBiquadFilter();
           filter.type = "peaking";
           filter.frequency.value = SdrAudioEngine.EQ_BANDS[i];
-          filter.Q.value = 1.41; // ~1 octave bandwidth
-          filter.gain.value = 0; // flat by default
+          filter.Q.value = 1.41;
+          filter.gain.value = 0;
           prev.connect(filter);
           prev = filter;
           this.eqFilters.push(filter);
         }
         prev.connect(this.eqOutput);
+
+        // Audio compressor — normalizes volume between stations.
+        // Some FM stations broadcast 10 dB louder than others.
+        // The compressor gently levels the output so you don't have
+        // to adjust the volume when switching stations.
+        this.compressor = ctx.createDynamicsCompressor();
+        this.compressor.threshold.value = -20;  // start compressing at -20 dBFS
+        this.compressor.knee.value = 6;          // soft knee
+        this.compressor.ratio.value = 3;         // 3:1 compression
+        this.compressor.attack.value = 0.01;     // 10ms attack
+        this.compressor.release.value = 0.25;    // 250ms release
+
         this.realGain.connect(this.eqInput);
-        this.eqOutput.connect(this.masterGain!);
+        this.eqOutput.connect(this.compressor);
+        this.compressor.connect(this.masterGain!);
       }
       // Open the master gain so real audio is audible
       if (this.masterGain) {
@@ -146,6 +155,10 @@ export class SdrAudioEngine {
       if (this.eqOutput) {
         try { this.eqOutput.disconnect(); } catch {}
         this.eqOutput = null;
+      }
+      if (this.compressor) {
+        try { this.compressor.disconnect(); } catch {}
+        this.compressor = null;
       }
       this.eqFilters = [];
       this.nextStartTime = 0;

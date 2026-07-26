@@ -34,6 +34,9 @@ import { TuningDial } from "@/components/sdr/tuning-dial";
 import { SdrcomMeter } from "@/components/sdr/sdrcom-meter";
 import { PresetProfilesPanel } from "@/components/sdr/preset-profiles-panel";
 import { GraphicEqPanel } from "@/components/sdr/graphic-eq-panel";
+import { AfcControl } from "@/components/sdr/afc-control";
+import { SleepTimer } from "@/components/sdr/sleep-timer";
+import { SignalHistoryGraph } from "@/components/sdr/signal-history-graph";
 import { useSdrStore, hydrateFromStorage } from "@/lib/sdr-store";
 import { formatFrequency } from "@/lib/sdr-engine";
 import { MousePointer2, Crosshair, Maximize2 } from "lucide-react";
@@ -83,8 +86,10 @@ export default function Home() {
                   <span className="text-xs uppercase tracking-widest text-[oklch(0.65_0.02_250)]">
                     Spectrum Analyzer · HD
                   </span>
+                  <AfcControl />
                 </div>
                 <div className="flex items-center gap-3">
+                  <SleepTimer />
                   <button
                     type="button"
                     onClick={() => setFullscreen(true)}
@@ -142,6 +147,9 @@ export default function Home() {
               <SignalMeter />
               <AudioOscilloscope height={64} />
             </div>
+
+            {/* Signal history graph */}
+            <SignalHistoryGraph />
 
             {/* Graphic EQ — 10-band with presets + frequency response curve */}
             <GraphicEqPanel />
