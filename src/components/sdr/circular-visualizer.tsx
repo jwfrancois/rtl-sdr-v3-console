@@ -131,7 +131,7 @@ export function CircularVisualizer({ size = 120 }: { size?: number }) {
   if (!isActive) {
     return (
       <div className="sdr-panel rounded-xl p-4">
-        <PausedCanvas label="{label}" />
+        <PausedCanvas label="Visualizer" />
       </div>
     );
   }

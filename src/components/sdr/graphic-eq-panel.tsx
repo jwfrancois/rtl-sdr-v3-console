@@ -269,7 +269,7 @@ export function GraphicEqPanel() {
   if (!isActive) {
     return (
       <div className="sdr-panel rounded-xl p-4">
-        <PausedCanvas label="{label}" />
+        <PausedCanvas label="Graphic EQ" />
       </div>
     );
   }

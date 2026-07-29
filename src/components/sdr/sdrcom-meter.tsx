@@ -273,7 +273,7 @@ export function SdrcomMeter() {
   if (!isActive) {
     return (
       <div className="sdr-panel rounded-xl p-4">
-        <PausedCanvas label="{label}" />
+        <PausedCanvas label="SDRCOM Meter" />
       </div>
     );
   }

@@ -1,7 +1,6 @@
 "use client";
 
-import { useNonEssentialThrottle } from "@/lib/render-throttle";
-import { Pause, Eye } from "lucide-react";
+import { Pause } from "lucide-react";
 
 /**
  * Paused canvas placeholder — shown when a non-essential canvas is

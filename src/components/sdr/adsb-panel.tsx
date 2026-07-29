@@ -75,7 +75,7 @@ export function AdsbPanel() {
   if (!isActive) {
     return (
       <div className="sdr-panel rounded-xl p-4">
-        <PausedCanvas label="{label}" />
+        <PausedCanvas label="ADS-B Radar" />
       </div>
     );
   }
