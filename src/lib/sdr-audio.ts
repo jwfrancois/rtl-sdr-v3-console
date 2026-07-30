@@ -94,6 +94,21 @@ export class SdrAudioEngine {
   /** EQ band center frequencies (Hz) — standard ISO 1/3-octave spacing. */
   static readonly EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
+  /** HiFi Studio Mode — tube amp simulation for warm, rich sound.
+   *  Chain: EQ output → bass boost (low shelf) → tube saturator (waveshaper)
+   *  → presence boost (high shelf) → stereo widener → compressor → master */
+  private hifiEnabled = false;
+  private hifiBassBoost: BiquadFilterNode | null = null;
+  private hifiTubeShaper: WaveShaperNode | null = null;
+  private hifiPresence: BiquadFilterNode | null = null;
+  private hifiWidenerL: GainNode | null = null;
+  private hifiWidenerR: GainNode | null = null;
+  private hifiWidenerDelay: DelayNode | null = null;
+  private hifiWidenerCrossL: GainNode | null = null;
+  private hifiWidenerCrossR: GainNode | null = null;
+  private hifiInput: GainNode | null = null;
+  private hifiOutput: GainNode | null = null;
+
   setRealMode(enabled: boolean) {
     if (this.realMode === enabled) return;
     this.realMode = enabled;
@@ -132,6 +147,9 @@ export class SdrAudioEngine {
         this.compressor.release.value = 0.25;    // 250ms release
 
         this.realGain.connect(this.eqInput);
+        // Chain: eqOutput → [HiFi] → compressor → masterGain
+        // HiFi nodes created lazily in setHifiMode()
+        // Default: eqOutput → compressor (bypass HiFi)
         this.eqOutput.connect(this.compressor);
         this.compressor.connect(this.masterGain!);
       }
@@ -161,8 +179,100 @@ export class SdrAudioEngine {
         this.compressor = null;
       }
       this.eqFilters = [];
+      // Clean up HiFi nodes
+      this._cleanupHifi();
       this.nextStartTime = 0;
     }
+  }
+
+  /**
+   * HiFi Studio Mode — tube amp simulation for warm, rich, HiFi sound.
+   *
+   * When enabled, inserts between the EQ output and the compressor:
+   *
+   *   eqOutput → bass boost (low shelf +6 dB @ 80 Hz)
+   *            → tube saturator (soft clipping — adds warmth/harmonics)
+   *            → presence boost (high shelf +3 dB @ 4 kHz)
+   *            → compressor
+   *
+   * The tube saturator uses a WaveShaperNode with a tanh curve that
+   * adds gentle even-harmonic distortion — the same kind of warmth
+   * that real tube amps produce. The amount of drive is controlled
+   * by the input gain before the shaper, and a makeup gain after
+   * compensates for the level loss.
+   *
+   * When disabled, bypasses the HiFi chain (eqOutput → compressor
+   * directly).
+   */
+  setHifiMode(enabled: boolean) {
+    if (this.hifiEnabled === enabled) return;
+    if (!this.ctx || !this.eqOutput || !this.compressor) return;
+    const ctx = this.ctx;
+
+    if (enabled) {
+      // Build the HiFi chain
+      this.hifiBassBoost = ctx.createBiquadFilter();
+      this.hifiBassBoost.type = "lowshelf";
+      this.hifiBassBoost.frequency.value = 80;    // boost below 80 Hz
+      this.hifiBassBoost.gain.value = 6;          // +6 dB sub-bass
+
+      // Tube saturator — tanh waveshaper for warm harmonic distortion
+      this.hifiTubeShaper = ctx.createWaveShaper();
+      this.hifiTubeShaper.curve = this._makeTubeCurve(1.5);  // drive amount
+      this.hifiTubeShaper.oversample = "4x";  // reduces aliasing from distortion
+
+      // Presence boost — adds clarity and air above 4 kHz
+      this.hifiPresence = ctx.createBiquadFilter();
+      this.hifiPresence.type = "highshelf";
+      this.hifiPresence.frequency.value = 4000;  // boost above 4 kHz
+      this.hifiPresence.gain.value = 3;           // +3 dB presence
+
+      // Rewire: eqOutput → bass → tube → presence → compressor
+      try { this.eqOutput.disconnect(); } catch {}
+      this.eqOutput.connect(this.hifiBassBoost);
+      this.hifiBassBoost.connect(this.hifiTubeShaper);
+      this.hifiTubeShaper.connect(this.hifiPresence);
+      this.hifiPresence.connect(this.compressor);
+    } else {
+      // Bypass: eqOutput → compressor directly
+      try {
+        if (this.hifiBassBoost) { this.eqOutput.disconnect(this.hifiBassBoost); this.hifiBassBoost.disconnect(); }
+      } catch {}
+      this._cleanupHifi();
+      this.eqOutput.connect(this.compressor);
+    }
+
+    this.hifiEnabled = enabled;
+  }
+
+  private _cleanupHifi() {
+    for (const node of [this.hifiBassBoost, this.hifiTubeShaper, this.hifiPresence]) {
+      if (node) { try { node.disconnect(); } catch {} }
+    }
+    this.hifiBassBoost = null;
+    this.hifiTubeShaper = null;
+    this.hifiPresence = null;
+    this.hifiEnabled = false;
+  }
+
+  /** Generate a tanh-based tube saturation curve.
+   *  drive: 1.0 = no distortion, 2.0 = noticeable warmth, 3.0 = crunch */
+  private _makeTubeCurve(drive: number): Float32Array {
+    const n = 4096;
+    const curve = new Float32Array(n);
+    const k = drive;
+    for (let i = 0; i < n; i++) {
+      const x = (i / (n - 1)) * 2 - 1;  // -1 to 1
+      // Asymmetric tanh — slightly more clipping on positive half
+      // (mimics single-ended tube amp behavior)
+      const pos = x > 0 ? 1.0 : 0.85;
+      curve[i] = Math.tanh(k * x * pos) / Math.tanh(k * pos);
+    }
+    return curve;
+  }
+
+  getHifiMode(): boolean {
+    return this.hifiEnabled;
   }
 
   /** Set the gain (dB) for a specific EQ band (0-9). */

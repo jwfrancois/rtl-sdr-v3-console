@@ -5,7 +5,7 @@ import { useSdrStore } from "@/lib/sdr-store";
 import { findStationAt, stationSignalAt } from "@/lib/sdr-engine";
 import { getAudioEngine } from "@/lib/sdr-audio";
 import { onRealAudio } from "@/lib/real-sdr/use-real-sdr";
-import { Play, Pause, Volume2, VolumeX, Circle, Headphones } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Circle, Headphones, Disc3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -30,6 +30,7 @@ export function TransportBar({ level }: Props) {
   const frequency = useSdrStore((s) => s.frequency);
   const backend = useSdrStore((s) => s.backend);
   const hwConnected = useSdrStore((s) => !!s.hwStatus?.connected);
+  const [hifiMode, setHifiMode] = useState(false);
 
   const audioReadyRef = useRef(false);
   const settingsRef = useRef({ audioEnabled, volume, backend, hwConnected });
@@ -190,6 +191,27 @@ export function TransportBar({ level }: Props) {
       >
         {audioEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
         <span>{audioEnabled ? "AUDIO ON" : "AUDIO OFF"}</span>
+      </button>
+
+      {/* HiFi Studio Mode toggle */}
+      <button
+        type="button"
+        onClick={() => {
+          const next = !hifiMode;
+          setHifiMode(next);
+          getAudioEngine().setHifiMode(next);
+        }}
+        className={cn(
+          "flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all text-sm sdr-mono",
+          hifiMode
+            ? "bg-[oklch(0.85_0.18_195/0.18)] border-[oklch(0.85_0.18_195/0.6)] text-[oklch(0.95_0.05_195)] shadow-[0_0_12px_oklch(0.85_0.18_195/0.35)]"
+            : "bg-[oklch(0.18_0.03_255/0.6)] border-[oklch(0.85_0.18_195/0.15)] text-[oklch(0.7_0.04_250)] hover:bg-[oklch(0.22_0.04_255/0.8)]",
+        )}
+        title="HiFi Studio Mode: tube amp warmth + bass boost + presence boost"
+        aria-label="Toggle HiFi Studio Mode"
+      >
+        <Disc3 className={cn("h-3.5 w-3.5", hifiMode && "sdr-spin-slow")} />
+        <span>HIFI</span>
       </button>
 
       {/* Volume slider */}
