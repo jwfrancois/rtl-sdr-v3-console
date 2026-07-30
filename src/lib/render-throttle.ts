@@ -104,35 +104,25 @@ export function useRenderThrottle() {
  *  These are paused when mode is "essential" or when audio priority is on. */
 export function useNonEssentialThrottle() {
   const isVisibleRef = useRef(true);
-  const [isActive, setIsActive] = useState(
-    globalMode === "full" && !audioPriority
-  );
+  const [isActive, setIsActive] = useState(globalMode === "full");
 
   useEffect(() => {
     const onVisibility = () => { isVisibleRef.current = !document.hidden; };
     document.addEventListener("visibilitychange", onVisibility);
     onVisibility();
 
-    const modeCb = (m: RenderMode) => setIsActive(m === "full" && !audioPriority);
+    const modeCb = (m: RenderMode) => setIsActive(m === "full");
     modeListeners.add(modeCb);
-
-    // Also listen for audio priority changes by polling — simpler than
-    // adding a separate listener system. 100ms is fast enough for UI.
-    const audioCheckId = window.setInterval(() => {
-      setIsActive(globalMode === "full" && !audioPriority);
-    }, 200);
 
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       modeListeners.delete(modeCb);
-      window.clearInterval(audioCheckId);
     };
   }, []);
 
   const shouldRender = (): boolean => {
     if (!isVisibleRef.current) return false;
     if (globalMode === "essential") return false;
-    if (audioPriority) return false;
     const now = performance.now();
     if (now - nonEssentialLastRender < NON_ESSENTIAL_THROTTLE_MS) return false;
     nonEssentialLastRender = now;
