@@ -3,14 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useSdrStore } from "@/lib/sdr-store";
 import { onRealSpectrum } from "@/lib/real-sdr/use-real-sdr";
-import { Search, Radar, StopCircle, ChevronRight, Waves } from "lucide-react";
+import { Search, Radar, StopCircle, ChevronRight, Waves, BookmarkPlus, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
  * Band scan presets — common scanning ranges.
+ * AM Broadcast added for MW radio scanning.
  */
 const BAND_PRESETS = [
   { label: "FM Broadcast", start: 87.5e6, end: 108e6, step: 200e3, demod: "WFM" as const, bw: 180e3 },
+  { label: "AM Broadcast", start: 530e3, end: 1710e3, step: 10e3, demod: "AM" as const, bw: 10e3 },
   { label: "Airband (AM)", start: 118e6, end: 137e6, step: 25e3, demod: "AM" as const, bw: 25e3 },
   { label: "2m Ham Band", start: 144e6, end: 148e6, step: 12.5e3, demod: "NFM" as const, bw: 12.5e3 },
   { label: "NOAA Weather", start: 162.4e6, end: 162.55e6, step: 25e3, demod: "NFM" as const, bw: 25e3 },
@@ -25,6 +27,9 @@ interface FoundSignal {
   freq: number;
   strengthDb: number;
   band: string;
+  demod: string;
+  bw: number;
+  saved?: boolean;
 }
 
 /**
@@ -59,8 +64,10 @@ export function ScannerPanel() {
   const scanFoundFreq = useSdrStore((s) => s.scanFoundFreq);
   const setScanFoundFreq = useSdrStore((s) => s.setScanFoundFreq);
 
+  const addBookmark = useSdrStore((s) => s.addBookmark);
   const [found, setFound] = useState<FoundSignal[]>([]);
   const [currentIdx, setCurrentIdx] = useState<number>(-1);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   // Subscribe to spectrum updates for peak detection
   const spectrumRef = useRef<{ data: Float32Array; fc: number; sr: number } | null>(null);
@@ -135,7 +142,13 @@ export function ScannerPanel() {
             const band = scanBand.label;
             setFound((prev) => {
               if (prev.some((f) => Math.abs(f.freq - currentFreq) < step / 2)) return prev;
-              return [...prev, { freq: currentFreq, strengthDb: strength, band }];
+              return [...prev, {
+                freq: currentFreq,
+                strengthDb: strength,
+                band: scanBand.label,
+                demod: BAND_PRESETS.find((p) => p.label === scanBand.label)?.demod ?? "AM",
+                bw: BAND_PRESETS.find((p) => p.label === scanBand.label)?.bw ?? 10e3,
+              }];
             });
             window.setTimeout(() => {
               if (!stop) {
@@ -194,7 +207,13 @@ export function ScannerPanel() {
             const foundFreq = spec.fc + binFreqOffset;
             setFound((prev) => {
               if (prev.some((f) => Math.abs(f.freq - foundFreq) < step / 2)) return prev;
-              return [...prev, { freq: foundFreq, strengthDb: maxDb, band: scanBand.label }].sort((a, b) => b.strengthDb - a.strengthDb);
+              return [...prev, {
+                freq: foundFreq,
+                strengthDb: maxDb,
+                band: scanBand.label,
+                demod: BAND_PRESETS.find((p) => p.label === scanBand.label)?.demod ?? "AM",
+                bw: BAND_PRESETS.find((p) => p.label === scanBand.label)?.bw ?? 10e3,
+              }].sort((a, b) => b.strengthDb - a.strengthDb);
             });
           }
         }
@@ -224,7 +243,44 @@ export function ScannerPanel() {
 
   const handleJump = (f: FoundSignal, idx: number) => {
     setFrequency(f.freq);
+    setDemod(f.demod as any);
+    setBandwidth(f.bw);
     setCurrentIdx(idx);
+  };
+
+  const handleSaveOne = (f: FoundSignal, idx: number) => {
+    const label = f.freq >= 1e6
+      ? `${(f.freq / 1e6).toFixed(1)} MHz`
+      : `${(f.freq / 1e3).toFixed(0)} kHz`;
+    addBookmark({
+      label,
+      freq: f.freq,
+      modulation: f.demod as any,
+      bandwidth: f.bw,
+      note: `Found via ${f.band} scan @ ${f.strengthDb.toFixed(0)} dB`,
+    });
+    setFound((prev) => prev.map((s, i) => i === idx ? { ...s, saved: true } : s));
+    setSaveMsg(`Saved ${label}`);
+    window.setTimeout(() => setSaveMsg(null), 2000);
+  };
+
+  const handleSaveAll = () => {
+    const unsaved = found.filter((f) => !f.saved);
+    for (const f of unsaved) {
+      const label = f.freq >= 1e6
+        ? `${(f.freq / 1e6).toFixed(1)} MHz`
+        : `${(f.freq / 1e3).toFixed(0)} kHz`;
+      addBookmark({
+        label,
+        freq: f.freq,
+        modulation: f.demod as any,
+        bandwidth: f.bw,
+        note: `Found via ${f.band} scan @ ${f.strengthDb.toFixed(0)} dB`,
+      });
+    }
+    setFound((prev) => prev.map((s) => ({ ...s, saved: true })));
+    setSaveMsg(`Saved ${unsaved.length} stations to Memory Bank`);
+    window.setTimeout(() => setSaveMsg(null), 3000);
   };
 
   return (
@@ -327,37 +383,71 @@ export function ScannerPanel() {
             <span className="text-[10px] uppercase tracking-widest text-[oklch(0.55_0.04_250)]">
               Found ({found.length})
             </span>
-            <button
-              type="button"
-              onClick={() => setFound([])}
-              className="text-[10px] text-[oklch(0.5_0.04_250)] hover:text-[oklch(0.7_0.04_250)]"
-            >
-              Clear
-            </button>
-          </div>
-          <div className="max-h-32 overflow-y-auto sdr-scroll pr-1 space-y-0.5">
-            {found.map((f, i) => (
+            <div className="flex items-center gap-2">
+              {saveMsg && (
+                <span className="text-[10px] sdr-mono text-[oklch(0.80_0.18_155)]">{saveMsg}</span>
+              )}
               <button
-                key={`${f.freq.toFixed(0)}-${i}`}
                 type="button"
-                onClick={() => handleJump(f, i)}
+                onClick={handleSaveAll}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] sdr-mono bg-[oklch(0.80_0.18_155/0.14)] border border-[oklch(0.80_0.18_155/0.3)] text-[oklch(0.80_0.18_155)] hover:bg-[oklch(0.80_0.18_155/0.22)] transition-all"
+                title="Save all found stations to Memory Bank bookmarks"
+              >
+                <BookmarkPlus className="h-2.5 w-2.5" />
+                SAVE ALL
+              </button>
+              <button
+                type="button"
+                onClick={() => setFound([])}
+                className="text-[10px] text-[oklch(0.5_0.04_250)] hover:text-[oklch(0.7_0.04_250)]"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="max-h-40 overflow-y-auto sdr-scroll pr-1 space-y-0.5">
+            {found.map((f, i) => (
+              <div
+                key={`${f.freq.toFixed(0)}-${i}`}
                 className={cn(
-                  "w-full flex items-center justify-between gap-2 px-2 py-1 rounded-md text-left transition-all border",
+                  "group flex items-center justify-between gap-2 px-2 py-1 rounded-md border transition-all",
                   currentIdx === i
                     ? "bg-[oklch(0.85_0.18_195/0.16)] border-[oklch(0.85_0.18_195/0.5)]"
                     : "border-transparent hover:bg-[oklch(0.18_0.03_255/0.6)]",
                 )}
               >
-                <div className="flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => handleJump(f, i)}
+                  className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+                >
                   <ChevronRight className="h-3 w-3 text-[oklch(0.5_0.04_250)] shrink-0" />
                   <span className="text-[11px] sdr-mono text-[oklch(0.92_0.04_195)]">
-                    {(f.freq / 1e6).toFixed(4)} MHz
+                    {f.freq >= 1e6 ? `${(f.freq / 1e6).toFixed(4)} MHz` : `${(f.freq / 1e3).toFixed(0)} kHz`}
                   </span>
+                  <span className="text-[9px] px-1 rounded sdr-mono bg-[oklch(0.85_0.18_195/0.1)] text-[oklch(0.85_0.18_195)]">
+                    {f.demod}
+                  </span>
+                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] sdr-mono text-[oklch(0.82_0.16_70)]">
+                    {f.strengthDb.toFixed(0)} dB
+                  </span>
+                  {f.saved ? (
+                    <Check className="h-3 w-3 text-[oklch(0.80_0.18_155)]" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSaveOne(f, i)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-[oklch(0.80_0.18_155/0.15)] text-[oklch(0.7_0.04_250)] hover:text-[oklch(0.80_0.18_155)] transition-all"
+                      title="Save to Memory Bank"
+                      aria-label="Save station"
+                    >
+                      <BookmarkPlus className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
-                <span className="text-[10px] sdr-mono text-[oklch(0.82_0.16_70)]">
-                  {f.strengthDb.toFixed(0)} dB
-                </span>
-              </button>
+              </div>
             ))}
           </div>
         </div>
