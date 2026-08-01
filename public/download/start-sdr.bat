@@ -13,7 +13,7 @@ REM Step 1: Check Node.js
 echo [1/6] Checking Node.js...
 where node >nul 2>&1
 if errorlevel 1 (
-    echo   X Node.js not found. Install from https://nodejs.org
+    echo   ERROR: Node.js not found. Install from https://nodejs.org
     echo   Download the LTS version (20.x or higher)
     pause
     exit /b 1
@@ -24,7 +24,7 @@ echo   OK Node.js !NODE_VER!
 REM Step 2: Clone or update
 echo [2/6] Checking project files...
 if exist "%INSTALL_DIR%\.git" (
-    if /i "%1"=="--update" (
+    if /i "%~1"=="--update" (
         echo   Updating from GitHub...
         cd /d "%INSTALL_DIR%"
         git fetch origin
@@ -38,7 +38,7 @@ if exist "%INSTALL_DIR%\.git" (
     echo   Cloning from GitHub...
     git clone "https://github.com/jwfrancois/rtl-sdr-v3-console.git" "%INSTALL_DIR%"
     if errorlevel 1 (
-        echo   X Failed to clone. Check your internet connection.
+        echo   ERROR: Failed to clone. Check your internet connection.
         pause
         exit /b 1
     )
@@ -52,13 +52,13 @@ if not exist "node_modules\electron\dist" (
     echo   Running npm install...
     call npm install --legacy-peer-deps
     if errorlevel 1 (
-        echo   X npm install failed.
+        echo   ERROR: npm install failed.
         pause
         exit /b 1
     )
     echo   OK Dependencies installed
 ) else (
-    if /i "%1"=="--update" (
+    if /i "%~1"=="--update" (
         echo   Running npm install...
         call npm install --legacy-peer-deps
         echo   OK Dependencies installed
@@ -74,8 +74,8 @@ REM Step 5: Start rtl_tcp
 echo [5/6] Starting rtl_tcp...
 where rtl_tcp >nul 2>&1
 if errorlevel 1 (
-    echo   ! rtl_tcp not installed - app will use simulated mode
-    echo     To install: download rtl-sdr from https://www.rtl-sdr.com/
+    echo   NOTE: rtl_tcp not installed - app will use simulated mode
+    echo   To install: download rtl-sdr from https://www.rtl-sdr.com/
 ) else (
     tasklist /fi "imagename eq rtl_tcp.exe" 2>nul | find /i "rtl_tcp.exe" >nul
     if errorlevel 1 (
@@ -91,7 +91,7 @@ REM Step 6: Launch
 echo [6/6] Launching RTL-SDR V3 Console...
 echo.
 
-if /i "%1"=="--web" (
+if /i "%~1"=="--web" (
     echo   Starting web app...
     echo   Open http://localhost:3000 in your browser.
     echo.
